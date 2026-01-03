@@ -40,7 +40,7 @@ class SensorTemplate(ABC):
 
     # UAV     
     #FIX: assign return signature
-    def get_uav_detection():
+    def get_uav_detection(*args):
         pass 
    
     @abstractmethod

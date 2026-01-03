@@ -5,8 +5,8 @@ import geopandas as gpd
 import math
 from matplotlib.patches import Circle, FancyArrowPatch
 from matplotlib.animation import FuncAnimation, FFMpegWriter, PillowWriter
-from uav_v2 import UAV_v2
-from auto_uav_v2 import Auto_UAV_v2
+from uav import UAV
+from auto_uav import Auto_UAV
 #from map_env_revised import MapEnv
 
 class MapRenderer:
@@ -121,7 +121,7 @@ class MapRenderer:
         
         # Draw non-learning UAVs
         for uav in self.env.atc.get_uav_list():
-            if isinstance(uav, Auto_UAV_v2):
+            if isinstance(uav, Auto_UAV):
                 continue
                 
             pos = uav.current_position
@@ -247,7 +247,7 @@ class MapRenderer:
                         'position': row['current_position'],
                         'heading': row['current_heading'],
                         'final_heading': row['final_heading'],
-                        'is_auto': isinstance(row['uav'], Auto_UAV_v2),
+                        'is_auto': isinstance(row['uav'], Auto_UAV),
                         'uav': row['uav']
                     }
                     self.animation_data[time_step].append(uav_data)

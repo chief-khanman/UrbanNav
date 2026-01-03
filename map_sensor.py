@@ -3,8 +3,8 @@ from typing import List, Dict, Tuple, Any
 import numpy as np
 import math
 import shapely
-from uav_v2_template import UAV_v2_template
-from auto_uav_v2 import Auto_UAV_v2
+from uav_template import UAV_template
+from auto_uav import Auto_UAV
 from airspace import Airspace
 from atc import ATC
 import geopandas as gpd
@@ -45,7 +45,7 @@ class MapSensor(SensorTemplate):
     
 
     #### UAV ####
-    def get_uav_detection(self, self_uav: UAV_v2_template) -> List[Dict]:
+    def get_uav_detection(self, self_uav: UAV_template) -> List[Dict]:
         """
         Return data of other UAVs in space within detection radius.
         
@@ -59,7 +59,7 @@ class MapSensor(SensorTemplate):
         self.detection_radius = self_uav.detection_radius
         
         # Get UAV list from space
-        uav_list: List[UAV_v2_template] = self.atc.get_uav_list()
+        uav_list: List[UAV_template] = self.atc.get_uav_list()
         
         # Collect data for each UAV within detection radius
         for uav in uav_list:
@@ -76,7 +76,7 @@ class MapSensor(SensorTemplate):
         
         return other_uav_data_list
     
-    def get_nmac(self, self_uav: UAV_v2_template) -> Tuple[bool, List]:
+    def get_nmac(self, self_uav: UAV_template) -> Tuple[bool, List]:
         """
         Check for Near Mid-Air Collision (NMAC) with other UAVs.
         
@@ -108,7 +108,7 @@ class MapSensor(SensorTemplate):
             return True, nmac_list
         return False, nmac_list
     
-    def get_uav_collision(self, self_uav: UAV_v2_template) -> Tuple[bool, Any]:
+    def get_uav_collision(self, self_uav: UAV_template) -> Tuple[bool, Any]:
         """
         Check if there is a collision with another UAV.
         
@@ -143,7 +143,7 @@ class MapSensor(SensorTemplate):
     #### Restricted Area ####
     # TODO: this method needs to be tested,
     # TODO: to see what is the output when there is detection of Restricted Airspace
-    def get_ra_detection(self, self_uav: UAV_v2_template) -> List[Dict]:
+    def get_ra_detection(self, self_uav: UAV_template) -> List[Dict]:
         """
         Check if the UAV's detection radius intersects with restricted airspace.
         
@@ -192,7 +192,7 @@ class MapSensor(SensorTemplate):
         
         return ra_data
     
-    def get_ra_collision(self, self_uav: UAV_v2_template) -> Tuple[bool, Dict]:
+    def get_ra_collision(self, self_uav: UAV_template) -> Tuple[bool, Dict]:
         """
         Check if the UAV's body intersects with restricted airspace.
         
@@ -234,7 +234,7 @@ class MapSensor(SensorTemplate):
         
         return False, {}
     
-    def get_closest_restricted_area(self, self_uav: UAV_v2_template) -> Tuple[bool, Dict]:
+    def get_closest_restricted_area(self, self_uav: UAV_template) -> Tuple[bool, Dict]:
         """
         Find the closest restricted area to the UAV within detection radius.
         

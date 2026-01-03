@@ -1,14 +1,14 @@
+import time
 import math
 from copy import copy
 import random
 import numpy as np
-from typing import List, Tuple
-from space import Space
+from typing import List, Tuple, Type
 from shapely import Point
 from shapely.geometry import Polygon
 from airspace import Airspace
-from uav_v2_template import UAV_v2_template
-from auto_uav_v2 import Auto_UAV_v2
+from uav_template import UAV_template
+from auto_uav import Auto_UAV
 from vertiport import Vertiport
 
 
@@ -18,7 +18,10 @@ class ATC():
     Vertiport module also manages geographical constraints.
     """
     
-    def __init__(self, seed: int, airspace: Airspace, max_uavs: int = 40):
+    def __init__(self, 
+                 seed: int, 
+                 airspace: Airspace, 
+                 max_uavs: int = 40):
         """
         Initialize the MapSpace.
         
@@ -28,20 +31,22 @@ class ATC():
             seed: Random seed for reproducibility
             airspace: Airspace object containing geographical data and restricted areas
         """
-        random.seed(seed)
-        np.random.seed(seed)
+        self.seed:int = seed
         
-        self.airspace = airspace
-        self.uav_list:List = []
+        random.seed(self.seed)
+        np.random.seed(self.seed)
         
-        #! ATC's vertiport list has a reference to airspace vertiport list
-        self.vertiport_list:List = self.airspace.vertiport_list
+        self.airspace:Airspace = airspace
+        self.uav_list:List[UAV_template] = []
+        
+        
+        self.vertiport_list:List[Vertiport] = self.airspace.vertiport_list
         
         self.max_uavs = max_uavs
         self._seed = seed
    
     
-    def _set_uav(self, uav:UAV_v2_template):
+    def _set_uav(self, uav:UAV_template):
         """
         Adds a UAV to the UAV list.
 
@@ -56,7 +61,7 @@ class ATC():
 
     
         
-    def get_uav_list(self) -> List[UAV_v2_template]:
+    def get_uav_list(self) -> List[UAV_template]:
         """
         Returns the list of UAVs.
 
@@ -66,7 +71,7 @@ class ATC():
         return self.uav_list
     
 
-    def remove_uavs_by_id(self, ids_to_remove):
+    def remove_uavs_by_id(self, ids_to_remove:List[int]):
         """
         Removes UAV objects from the list based on their id attribute.
         Used when a collision is detected between two UAVs.
@@ -77,12 +82,24 @@ class ATC():
         Returns:
             None
         """
+        print(f'Current UAV list: {self.uav_list}')
+        
         self.uav_list = [uav for uav in self.uav_list if uav.id not in ids_to_remove]
-
+        
+        time.sleep(1)
+        print(f'Updated UAV list: {self.uav_list}')
+        
         return None
     
 
-    def create_uav(self, uav_type:UAV_v2_template, controller, dynamics, sensor, radius, nmac_radius, detection_radius) -> None:
+    def create_uav(self, 
+                   uav_type:type[UAV_template], 
+                   controller, 
+                   dynamics, 
+                   sensor, 
+                   radius, 
+                   nmac_radius, 
+                   detection_radius) -> None:
         # my space can have a max amount of agents
         # as UAVs are added, the space will keep track of the number of UAVs added 
         """
@@ -91,7 +108,7 @@ class ATC():
         Args:
             UAV constructor
         
-        Returns:
+        Returns:    
             None
         """
 
@@ -100,14 +117,15 @@ class ATC():
         
         
         return None
-        
+    
+    #! this method might not be necessary - use create_uav for all type of UAV creation 
     def create_auto_uav(self, dynamics, sensor, radius, nmac_radius, detection_radius) -> None:
         #FIX: why does AutoUAV not have a controller, this controller should be a (trained)model 
-        auto_uav = Auto_UAV_v2(dynamics, sensor, radius, nmac_radius, detection_radius)
+        auto_uav = Auto_UAV(dynamics, sensor, radius, nmac_radius, detection_radius)
         self._set_uav(auto_uav)
 
     
-    def assign_vertiport_uav(self, uav:UAV_v2_template, start:Vertiport, end:Vertiport )->None:
+    def assign_vertiport_uav(self, uav:UAV_template, start:Vertiport, end:Vertiport )->None:
         """
         Assign start and end vertiports to a UAV, ensuring they're different.
         
@@ -139,9 +157,15 @@ class ATC():
     #FIX: #### START ####
     # bring the following up to date for use with current env so that we can start making updates to vertiport
     # and sound modeling 
-
-    def assign_vertiport_from_lat_long(lat_long:Tuple) -> Vertiport:
-        pass
+    def _convert_lat_long_xy(self, lat_long:Tuple[float, float]) -> Tuple[float, float]:
+        raise NotImplementedError
+        x,y = 0,0
+        return x,y
+    
+    def assign_vertiport_from_lat_long(self, lat_long:Tuple) -> Vertiport:
+        x,y = self._convert_lat_long_xy(lat_long)
+        vertiport = Vertiport(Point(x,y))
+        return vertiport 
     
     
     

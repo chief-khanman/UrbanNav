@@ -8,7 +8,7 @@ from sensor_template import SensorTemplate
 from controller_template import ControllerTemplate
 from dynamics_template import DynamicsTemplate
 
-class UAV_v2_template(ABC):
+class UAV_template(ABC):
     """
     Abstract Base Class (ABC) for a UAV (Unmanned Aerial Vehicle) template.
 

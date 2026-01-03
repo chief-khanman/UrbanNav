@@ -3,7 +3,7 @@ import numpy as np
 import xarray as xr
 from geopandas import GeoDataFrame as GDF
 from shapely import Point
-from uav_v2_template import UAV_v2_template
+from uav_template import UAV_v2_template
 
 
 

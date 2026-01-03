@@ -1,7 +1,7 @@
 
-from uav_v2_template import UAV_v2_template
+from uav_template import UAV_template
 
-class UAV_v2(UAV_v2_template):
+class UAV(UAV_template):
 
     def __init__(self, controller, dynamics,sensor,radius, nmac_radius,detection_radius):
         super().__init__(controller, dynamics,sensor,radius, nmac_radius,detection_radius)

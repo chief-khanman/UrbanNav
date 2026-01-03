@@ -1,6 +1,6 @@
 import geopandas as gpd
 from matplotlib.axes._axes import Axes
-from uav_v2 import UAV_v2
+from uav import UAV_v2
 import numpy as np
 
 def compute_time_to_impact(host_uav:UAV_v2, other_uav:UAV_v2):

@@ -1,6 +1,6 @@
 # import modules 
 import rvo2
-from uav_v2_template import UAV_v2_template
+from uav_template import UAV_template
 from controller_template import ControllerTemplate
 import shapely
 from typing import List, Dict 
@@ -11,17 +11,21 @@ from typing import List, Dict
 
 # connect this file with all ORCA agents 
 class RVO2_simulator:
-    def __init__(self, timestep,radius,max_speed, mapped_env_orca_agent_list:List[UAV_v2_template] = None):
+    def __init__(self, 
+                 timestep,
+                 radius,
+                 max_speed, 
+                 mapped_env_orca_agent_list:List[UAV_template]):
         # create the ORCA sim 
-        self.rvo2_sim = rvo2.PyRVOSimulator(# the arguments should be added to __init__ above
-                                        timestep, #sim timestep 
-                                        3*radius, # neighborDist - 3 times of radius
-                                        10, #  maxNeighbor - number of neighbor to keep in account when performing collision avoidance 
-                                        5, # time horizon other agents - secondss use the website for definition: https://gamma.cs.unc.edu/RVO2/documentation/2.0/params.html 
-                                        5, # time horizon obstacles - seconds
-                                        radius, # size of UAV
-                                        max_speed, # max speed of UAV
-                                        )
+        # the arguments should be added to __init__ above
+        self.rvo2_sim = rvo2.PyRVOSimulator(timestep, #sim timestep 
+                                            3*radius, # neighborDist - 3 times of radius
+                                            10, #  maxNeighbor - number of neighbor to keep in account when performing collision avoidance 
+                                            5, # time horizon other agents - secondss use the website for definition: https://gamma.cs.unc.edu/RVO2/documentation/2.0/params.html 
+                                            5, # time horizon obstacles - seconds
+                                            radius, # size of UAV
+                                            max_speed, # max speed of UAV
+                                            )
         
         # list of restricted areas in env/map
         self.orca_polygon_list = []
@@ -36,7 +40,7 @@ class RVO2_simulator:
         # MAPPING between env/sim uav_id_str and env/sim UAV_obj
         #
         #                                    env/sim uav_id_str,   env/sim UAV_obj                                            
-        self.orca_agent_id_to_mapped_agent_obj:Dict[str, UAV_v2_template] = {}
+        self.orca_agent_id_to_mapped_agent_obj:Dict[str, UAV_template] = {}
 
 
     
@@ -109,7 +113,7 @@ class RVO2_simulator:
         
         return None
     
-    def addAgent(self, new_agent:UAV_v2_template):
+    def addAgent(self, new_agent:UAV_template):
         # add new_agent to ORCA_agent_list - List[UAV]
         new_agent_id_str = str(new_agent.id)
         self.mapped_env_orca_agent_list.append(new_agent)
@@ -123,7 +127,7 @@ class RVO2_simulator:
 
         return None
         
-    def getPrefVelocity(self, agent:UAV_v2_template):
+    def getPrefVelocity(self, agent:UAV_template):
         '''Return the prefVelocity tuple for RVO2 sim'''
         
         current_position = agent.current_position

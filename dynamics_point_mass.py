@@ -1,9 +1,9 @@
 import math
 from dynamics_template import DynamicsTemplate
 from shapely import Point
-from uav_v2_template import UAV_v2_template
-from uav_v2 import UAV_v2
-from auto_uav_v2 import Auto_UAV_v2
+from uav_template import UAV_template
+from uav import UAV
+from auto_uav import Auto_UAV
 import numpy as np
 
 class PointMassDynamics(DynamicsTemplate):
@@ -11,16 +11,16 @@ class PointMassDynamics(DynamicsTemplate):
     def __init__(self, dt=0.1):
         super().__init__(dt)
 
-    def update(self,uav:UAV_v2_template, action):
+    def update(self,uav:UAV_template, action):
         """Update the UAV's position, speed, and heading based on the action taken."""
         # action[0] -> acceleration
         # action[1] -> heading_change 
         # print(f"action: {action}")
 
-        if isinstance(uav, UAV_v2):
+        if isinstance(uav, UAV):
             self.is_learning = False
             # print("===UAV_v2===")
-        elif isinstance(uav, Auto_UAV_v2): 
+        elif isinstance(uav, Auto_UAV): 
             self.is_learning = True
             # print("===Auto_UAV_v2===")
         else:
@@ -71,7 +71,7 @@ class PointMassDynamics(DynamicsTemplate):
             
             #TODO: this needs to be placed somewhere more appropriate 
             #TODO: WHY only AutoUAV - WHY not other UAVs ??
-            if isinstance(uav, Auto_UAV_v2):
+            if isinstance(uav, Auto_UAV):
                 
                 updated_final_heading = math.atan2(uav.end.y - uav.current_position.y,
                                                uav.end.x - uav.current_position.x)
