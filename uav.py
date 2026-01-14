@@ -3,8 +3,16 @@ from uav_template import UAV_template
 
 class UAV(UAV_template):
 
-    def __init__(self, controller, dynamics,sensor,radius, nmac_radius,detection_radius):
-        super().__init__(controller, dynamics,sensor,radius, nmac_radius,detection_radius)
+    def __init__(self, controller, dynamics,sensor,radius, nmac_radius,detection_radius,body_frame_north,body_frame_east,body_frame_down):
+        super().__init__(controller, 
+                         dynamics,
+                         sensor,
+                         radius, 
+                         nmac_radius,
+                         detection_radius, 
+                         body_frame_north=body_frame_north,
+                         body_frame_east=body_frame_east,
+                         body_frame_down=body_frame_down)
 
     def assign_start_end(self, start, end):
         return super().assign_start_end(start, end)
@@ -24,8 +32,6 @@ class UAV(UAV_template):
     def get_obs(self):
         return super().get_obs()
 
-    def get_action(self, observation):
-        action = self.controller(observation)
-        return action
+    
 
     

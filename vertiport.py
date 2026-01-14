@@ -40,7 +40,7 @@ class Vertiport:
         pass
 
 
-    def get_uav_list():
+    def get_uav_list(self,):
         pass
 
     

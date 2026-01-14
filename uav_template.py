@@ -30,7 +30,7 @@ class UAV_template(ABC):
         current_heading (float): Current heading of the UAV in radians.
     """
     
-    def __init__(self, controller, dynamics, sensor, radius, nmac_radius, detection_radius):
+    def __init__(self, controller, dynamics, sensor, radius, nmac_radius, detection_radius, body_frame_north, body_frame_east, body_frame_down):
         """
         Initialize the UAV with its controller, dynamics, sensor, and parameters.
 
@@ -42,20 +42,57 @@ class UAV_template(ABC):
             nmac_radius (float): NMAC detection radius.
             detection_radius (float): Radius for detecting other UAVs.
         """
-        self.id = id(self) 
+        self.id = id(self) #id can be thought of as tail number -  need to convert/add new id that starts at 0 
+        # UAV dimension
         self.radius = radius
+        # UAV sensor range
         self.nmac_radius = nmac_radius
         self.detection_radius = detection_radius
-        self.sensor: SensorTemplate = sensor
-        self.dynamics: DynamicsTemplate = dynamics
-        self.controller: ControllerTemplate = controller
+        # UAV mission completion epsilon distance
         self.mission_complete_distance = 40 # Increased from 10 to 40 to account for UAV overshotting goal between updates
-        self.current_speed = 0
+        
+        # UAV constraints
+        self.max_heading_change = math.pi # Passed to DynamicsPointMass for action renormalization
         self.max_speed = 80
         self.max_acceleration = 1 # Passed to DynamicsPointMass for action renormalization
-        self.max_heading_change = math.pi # Passed to DynamicsPointMass for action renormalization
         self.rotor_speed = 1 #! this is temp value, we need to find a way to calculate and update this method
+        
+        # UAV incidence counter/metric
         self.nmac_count = 0
+        
+        # UAV kinematics state 
+        self.current_speed = 0
+        self.current_heading = 0
+        
+        # body frame coordinate system 
+        self.n = body_frame_north
+        self.e = body_frame_east 
+        self.d = body_frame_down 
+
+        # dynamics
+        self.dynamics_type = None
+        
+        # UAV vector state
+        self.px = None
+        self.py = None
+        self.pz = None
+        
+        self.vx = None
+        self.vy = None
+        self.vz = None
+        
+        # UAV will only carry state information - state information will be used for
+        # 1. sensor
+        # 2. dynamics
+        # 3. controller 
+        
+        # NO NEED of the following -    
+        # self.sensor: SensorTemplate = sensor
+        # self.dynamics: DynamicsTemplate = dynamics
+        # self.controller: ControllerTemplate = controller
+        
+        
+
 
     @abstractmethod
     def assign_start_end(self, start: Point, end: Point):
@@ -123,17 +160,17 @@ class UAV_template(ABC):
         """
         ref_prll, ref_orth = self.get_ref()
         return {'id':self.id,
-                'current_position':self.current_position,
-                'distance_to_end': self.start.distance(self.end),
+                'current_position':self.current_position, #global position
+                'distance_to_end': self.start.distance(self.end), #mission_distance
                 'distance_covered': self.start.distance(self.current_position), #TODO: wrong def 
                 'distance_to_goal': self.current_position.distance(self.end),
-                'max_dist': self.start.distance(self.end),
+                'max_dist': self.start.distance(self.end),#mission_distance
                 'min_dist': 0,
                 'min_speed': 0,
                 'max_speed': self.max_speed, 
                 'current_speed': self.current_speed,
-                'current_heading': self.current_heading,
-                'final_heading': self.final_heading,
+                'current_heading': self.current_heading, # map_north - body_frame_north
+                'final_heading': self.final_heading, # goal_deviation = goal_vector - body_frame_north
                 'end':self.end,
                 'radius': self.radius,
                 'ref_prll':ref_prll,
@@ -169,20 +206,6 @@ class UAV_template(ABC):
         
         return (own_data, sensor_data) # TODO: named tuple would be better for sensor data.
 
-    def get_action(self, observation):
-        """
-        Retrieve an action based on the given observation.
-        The input argument 'observation' should be same as the observation of agent in env. 
-        This needs to be maintained in order to perform supervised learning, as pre-training for the AutoUAV.
-
-        Args:
-            observation: The input observation used by the controller.
-
-        Returns:
-            The action determined by the controller.
-        """
-        self.action = self.controller(observation=observation)
-        return self.action
 
     def get_ref(self):
         """

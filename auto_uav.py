@@ -2,8 +2,8 @@ from uav_template import UAV_template
 
 
 class Auto_UAV(UAV_template):
-    def __init__(self,dynamics, sensor, radius, nmac_radius, detection_radius):
-        super().__init__(None, dynamics, sensor, radius, nmac_radius, detection_radius)
+    def __init__(self,dynamics, sensor, radius, nmac_radius, detection_radius, body_frame_north, body_frame_east, body_frame_down):
+        super().__init__(None, dynamics, sensor, radius, nmac_radius, detection_radius, body_frame_north=body_frame_north, body_frame_east=body_frame_east, body_frame_down=body_frame_down)
         
     def assign_start_end(self, start, end):
         return super().assign_start_end(start, end)
