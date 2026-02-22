@@ -1,25 +1,31 @@
 # run_simulation.py
-from simulator import UAMSimulator, RLController, LQRController, ATCController
-from simulator import ControllerManifest, ExecutionMode
+import os
+import numpy as np
+from uam_simulator import UAMSimulator
+from controller import RLController, LQRController, ATCController
+from controller import ControllerManifest
+from aer_bus import ExecutionMode, AerBus
 
-# Create SIMULATOR
-sim = UAMSimulator(config={
-    'dt': 0.1,
-    'n_uavs': 50,
-    'mode': 'deployment'
-})
+from stable_baselines3 import PPO
+
+#config_file
+config_file = './Path/to/config'
+
+# Create SIMULATOR - AerBus is now integrated into UAMSimulator
+sim = UAMSimulator(config_path=config_file)
 
 # Load trained RL controller
-from stable_baselines3 import PPO
-rl_policy = PPO.load("trained_rl_controller")
+rl_policy = PPO.load("./trained_rl_controller")
 
 rl_controller = RLController(
     manifest=ControllerManifest(
-        controller_id='rl_agent_1',
-        controlled_uav_ids=['uav_0', 'uav_1', 'uav_2', 'uav_3'],
-        required_state_keys=['uav_states', 'nearby_uavs'],
-        output_type='action',
-        execution_mode='inline'
+        controller_id='rl_agent_1', # WHO
+        controlled_state='uav', # WHAT 
+        controlled_state_id=['uav_0', 'uav_1', 'uav_2', 'uav_3'], # WHAT
+        #controlled_uav_ids=['uav_0', 'uav_1', 'uav_2', 'uav_3'],
+        required_state_keys=['uav_states', 'nearby_uavs'], # WHAT - change this so that it contains controlled_state.attr, in this case uav.sensor
+        output_type='action', # HOW - change this to have controller output command, and also how many commands/data is being sent, like acceleration+heading_change OR d_vx+d_vy, etc
+        execution_mode='inline' # WHEN - at what time steps of the simulator should the simulator expect the outputs, every time step, some time step, etc
     ),
     policy=rl_policy
 )
@@ -27,9 +33,11 @@ rl_controller = RLController(
 # Create LQR controller
 lqr_controller = LQRController(
     manifest=ControllerManifest(
-        controller_id='lqr_ctrl',
-        controlled_uav_ids=[f'uav_{i}' for i in range(4, 29)],  # 25 UAVs
-        required_state_keys=['uav_states'],
+        controller_id='rl_agent_1',
+        controlled_state='uav',
+        controlled_state_id=['uav_0', 'uav_1', 'uav_2', 'uav_3'],
+        #controlled_uav_ids=['uav_0', 'uav_1', 'uav_2', 'uav_3'],
+        required_state_keys=['uav_states', 'nearby_uavs'],
         output_type='action',
         execution_mode='inline'
     ),
@@ -40,31 +48,53 @@ lqr_controller = LQRController(
 # Create ATC
 atc = ATCController(
     manifest=ControllerManifest(
-        controller_id='atc',
-        controlled_uav_ids=[f'uav_{i}' for i in range(50)],  # All UAVs
-        required_state_keys=['uav_states', 'airspace'],
-        output_type='directive',
-        execution_mode='process'  # Run in separate process
+        controller_id='rl_agent_1',
+        controlled_state='uav',
+        controlled_state_id=['uav_0', 'uav_1', 'uav_2', 'uav_3'],
+        #controlled_uav_ids=['uav_0', 'uav_1', 'uav_2', 'uav_3'],
+        required_state_keys=['uav_states', 'nearby_uavs'],
+        output_type='action',
+        execution_mode='inline'
     )
 )
 
+# vertiport_controller = ATCVertiportController(
+#     manifest=ControllerManifest(
+#         controller_id='atc_vertiport_controller',
+#         controlled_state='atc',  # All UAVs
+#         controlled_state_id=['atc'],
+#         required_state_keys=['uav_states', 'airspace'],
+#         output_type='directive',
+#         execution_mode='process'  # Run in separate process
+#     )
+# )
+
+# AER_BUS is initiated inside UAM_SIMULATOR, 
 # Register controllers
-sim.register_controller(rl_controller, ExecutionMode.INLINE)
-sim.register_controller(lqr_controller, ExecutionMode.INLINE)
-sim.register_controller(atc, ExecutionMode.PROCESS)
+sim.aer_bus.register_controller(rl_controller, ExecutionMode.INLINE)
+sim.aer_bus.register_controller(lqr_controller, ExecutionMode.INLINE)
+sim.aer_bus.register_controller(atc, ExecutionMode.PROCESS)
 
 # Note: External RRT controller connects via ZeroMQ automatically
 # Just run: python external_rrt_controller.py
 
-# Run simulation
+
+
 for step in range(1000):
-    state, done, info = sim.step()
+    sim_state, done, info = sim.step() # what is the purpose of DONE ??
+    sim.metrics.log_step_metrics(sim_state, info)
     
     if done:
         break
     
     if step % 10 == 0:
         print(f"Step {step}: {len(info['collisions'])} collisions")
+    
+    #rendering
+    if sim.render_each_step:
+        sim.renderer.render(sim_state)
+    else:
+        sim.renderer.log_render(sim_state, info)
 
-# Save final state
-sim.save_state('final_state.json')
+# Metrics
+sim.metrics.calculate_metrics(sim.metrics.log)

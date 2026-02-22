@@ -1,6 +1,6 @@
 # train_rl_controller.py
 from stable_baselines3 import PPO
-from simulator import UAMSimulator, UAMSimEnv
+from uam_simulator import UAMSimulator, UAMSimEnv
 
 # Create simulator
 sim = UAMSimulator(config={

@@ -43,6 +43,8 @@ class Vertiport:
     def get_uav_list(self,):
         pass
 
+    def update_queue(self,):
+        pass
     
 
 if __name__ == '__main__':

@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Dict, List, Tuple, Any
-import numpy as np 
-#from uav_v2_template import UAV_v2_template
-class SensorTemplate(ABC):
+
+
+class Sensor(ABC):
 
     '''
     Collect other UAVs state information
@@ -27,51 +27,65 @@ class SensorTemplate(ABC):
 
 
     @abstractmethod
-    def __init__(self, space)->None:
+    def __init__(self)->None:
         return None
 
 
 
-    def get_data(self, self_uav) -> Tuple[List, List]:
+    def get_sensor_data(self, uav_id:str, sensor_active_status:bool=True) -> Dict[str, List]: #Tuple[List, List]
         '''Combination of uav detection(List of Dict) and ra detection(List of Dict)'''
-        pass
+        
+        if sensor_active_status:
+            detect_uav_id_list = self.get_uav_detection(uav_id)
+            detect_ra_id_list = self.get_ra_detection(uav_id)
+            nmac_uav_id_list = self.get_nmac(uav_id)
+            collision_uav_id_list = self.get_uav_collision(uav_id)
+            collision_ra_id_list = self.get_ra_collision(uav_id)
+        else: 
+            detect_uav_id_list = []
+            detect_ra_id_list = []
+            nmac_uav_id_list = []
+            collision_uav_id_list = []
+            collision_ra_id_list = []
+        
+        sensor_data_packet = {
+                            'detect_uav': detect_uav_id_list,
+                            'detect_ra': detect_ra_id_list,
+                            'detect_nmac': nmac_uav_id_list,
+                            'collision_uav': collision_uav_id_list,
+                            'collision_ra': collision_ra_id_list
+                            }
+        
+        return sensor_data_packet
 
 
 
     # UAV     
-    #FIX: assign return signature
-    def get_uav_detection(*args):
+    @abstractmethod
+    def get_uav_detection(self, uav_id:str, *args) -> List[str]:
+        # RUN broad phase collision detection 
         pass 
    
     @abstractmethod
-    def get_nmac(self) -> Tuple[bool, List]:
+    def get_nmac(self, uav_id:str) -> List[str]: #Tuple[bool, List]:
         '''Collect the time step and UAVs with who there was an NMAC'''
         pass
     
     @abstractmethod
-    def get_uav_collision(self,)->Tuple[bool, Tuple|Any]:
+    def get_uav_collision(self, uav_id:str)-> List[str] #Tuple[bool, Tuple|Any]:
         '''returns a bool if there is a collision along with UAV id'''
         pass
 
 
     # Restricted Airspace (ra)
-    def get_ra_detection()->Tuple[bool, Dict]:
+    def get_ra_detection(self, uav_id:str)-> List[str]: #Tuple[bool, Dict]:
         pass
 
-    def get_ra_collision()-> Tuple[bool, Dict]:
+    def get_ra_collision(self, uav_id:str)-> List[str]: #Tuple[bool, Dict]:
+        # RUN narrow phase 
         pass
 
 
     
 
-
-    # Deactivate sensor 
-    def deactivate_nmac(self, uav)->Tuple[bool, List]:
-        pass
-
-    def deactivate_detection()->None:
-        pass
-
-    def deactivate_collision(self, uav)->Tuple[bool, List]:
-        pass
 

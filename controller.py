@@ -3,11 +3,29 @@ from dataclasses import dataclass
 from typing import List, Dict, Any
 import numpy as np
 
+
+
+
+
+# if controller is external and dynamics is internal - controller needs to provide control actions that internal_dynamics requires
+# the control action will enter as a dict with internal_dynamics keywords 
+# 
+# if controller is internal AND dynamics is external - dynamics needs to match what controller provides 
+# dynamics is updating position and velocity - acceleration of some kind needs to be provided either as 
+# 
+# WHEN any of the above is external i can use the EXECUTION.PROCESS mode  
 @dataclass
 class ControllerManifest:
     """Metadata describing what a controller needs and provides"""
     controller_id: str
-    controlled_uav_ids: List[str]  # Which UAVs this controls
+    
+    controlled_state:str # which asset does it control: AIRSPACE, ATC, VERTIPORT, UAV
+    controlled_state_attr:str
+    controlled_state_id:List[str] | None
+    
+    #remove this 
+    #controlled_uav_ids: List[str]  # Which UAVs this controls
+    
     required_state_keys: List[str]  # What state info it needs
     output_type: str  # 'action', 'waypoint', 'velocity', etc.
     execution_mode: str  # 'inline', 'process', 'external'
@@ -117,32 +135,5 @@ class LQRController(BaseController):
         pass  # LQR is stateless
 
 
-class ATCController(BaseController):
-    """Air Traffic Control - provides directives to all UAVs"""
+
     
-    def __init__(self, manifest: ControllerManifest):
-        super().__init__(manifest)
-        self.assigned_routes = {}
-    
-    def compute_action(self, observation: Dict[str, Any]) -> Dict[str, Any]:
-        """ATC doesn't send control actions, but high-level directives"""
-        directives = {}
-        
-        # Detect conflicts
-        conflicts = self._detect_conflicts(observation['uav_states'])
-        
-        # Issue directives
-        for uav_id in conflicts:
-            directives[uav_id] = {
-                'type': 'altitude_change',
-                'target_altitude': self._compute_safe_altitude(uav_id)
-            }
-        
-        return directives
-    
-    def _detect_conflicts(self, uav_states):
-        # Conflict detection logic
-        return []
-    
-    def reset(self):
-        self.assigned_routes.clear()

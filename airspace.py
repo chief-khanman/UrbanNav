@@ -21,32 +21,40 @@ from vertiport import Vertiport
 # restricted airspace creation
 #
 class Airspace: 
-    """Class to create airspace type object in simulator."""
+    
+    """Primary Airspace asset and methods for adding vertiports. """
+    
     def __init__(
         self,
         location_name: str,
         number_of_vertiports: int,
-        max_vp_airspace: int = 250_000,
         vertiport_tag_list: List[Tuple[str,str]] | List = [],
-        airspace_tag_list: List[Tuple[str,str]] | List = [], #airspace_tag_list: List[Tuple('building:commercial', ...)]
+        airspace_restricted_area_tag_list: List[Tuple[str,str]] | List = [], #airspace_restricted_area_tag_list: List[Tuple('building:commercial', ...)]
         buffer_radius: float = 500,
         seed=123
     ) -> None: 
         
         """ 
+        Initialize the Airspace asset, 
+        and if vertiport_tag_list, and airspace_restricted_area_tag_list are defined
+        user can build vertiports and restricted areas using 
+        vertiport_utm 
+        AND 
+        airspace_restricted_area_buffer_array
+        
         Args:
-            number_of_vertiports: Vertiports in the airspace for simulation
+            number_of_vertiports: total number of vertiports in the airspace for simulation
             location_name (string): Location of the Airspace ie. "Austin, Texas, USA"
+            airspace_restricted_area_tag_list: Tags from OSMNx used for selecting restricted airspace
+            vertiport_tag_list: Tags from OSMNx used for selecting vertiports in airspace
             buffer_radius (int): Distance around restriced airspace
-            airspace_tag_list: Tags from OSMNx used for selecting restricted airspace
-            vertiport_tag_list: ??
-            max_vp_airspace: Limit of vertiport in simulator
+            seed: for seeding random generator 
 
         """
         self.seed = seed
         self.location_name = location_name  #'Austin, Texas, USA'
         self.buffer_radius = buffer_radius
-        self.airspace_tag_list = airspace_tag_list #airspace_tag_list: [('building','commercial'), ...]
+        self.airspace_restricted_area_tag_list = airspace_restricted_area_tag_list #airspace_restricted_area_tag_list: [('building','commercial'), ...]
         self.vertiport_tag_list = vertiport_tag_list
 
         location_gdf = geocode_to_gdf(self.location_name)  # converts named geocode - 'Austin,Texas' location to gdf
@@ -70,6 +78,7 @@ class Airspace:
         self.location_utm_gdf: gpd.GeoDataFrame = ox_projection.project_gdf(location_gdf)  # default projection - UTM projection #! GeoDataFrame has deprication warning - need quick fix
         self.location_utm_gdf["boundary"] = (self.location_utm_gdf.boundary)  # adding column 'boundary'
 
+        #* IMPROVEMENT PLAN: a function will create vertiports dict for given tag_list dicts - the vertiports_utm dict is used for accessing data and building veriports 
         # Airspace vertiport location data
         if self.vertiport_tag_list:  # example vertiport_tag_list: List[Tuple('building', 'commercial'), ... , ... , ... ]
             # create empty dict containers for geodataframe
@@ -96,9 +105,9 @@ class Airspace:
                     continue
 
 
-
+        #* IMPROVEMENT PLAN: a function will create restricted_airspace for given tag_list dicts
         # Airspace restricted area data
-        if self.airspace_tag_list:
+        if self.airspace_restricted_area_tag_list:
             # create empty dict container for restricted areas
             self.location_tags:Dict[str,str] = {}
             self.location_feature:Dict[str, GeoDataFrame] = {}
@@ -108,7 +117,7 @@ class Airspace:
             self.airspace_restricted_area_buffer_array:List[GeoSeries] = []
             self.airspace_restricted_area_array:List[GeoDataFrame] = []
 
-            for tag, tag_value in self.airspace_tag_list:
+            for tag, tag_value in self.airspace_restricted_area_tag_list:
                 self.location_tags[tag_value] = tag
                 try:
                     with warnings.catch_warnings():
@@ -133,14 +142,24 @@ class Airspace:
             self.restricted_airspace_geo_series = pd.concat(self.airspace_restricted_area_array)
 
         # Vertiport data
-        self.number_of_vertiports = number_of_vertiports #! change the name of this variable
+        self.max_num_vps_airspace = number_of_vertiports #! change the name of this variable
         self.vertiport_list:List[Vertiport] = []
-        self.max_vp_airspace = max_vp_airspace 
         self.polygon_dict:Dict[str,List[Polygon]] = {} #key,value = str, Polygon #! where and why is this needed 
+
+        return None
 
     def __repr__(self) -> str:
         return "Airspace({location_name})".format(location_name=self.location_name)
     
+    def get_state(self,):
+        """
+        Returns the list of vertiports.
+        Airspace state is current vertiports. 
+        Returns:
+            List: The list of vertiports.
+        """
+        return self.vertiport_list
+
     def _fix_invalid_geometries(self, gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         """Fix invalid geometries in a GeoDataFrame."""
         if gdf.empty:
@@ -164,12 +183,11 @@ class Airspace:
         Returns:
             None
         """
-        if len(self.vertiport_list) < self.max_vp_airspace:
+        if len(self.vertiport_list) < self.max_num_vps_airspace:
             self.vertiport_list.append(vertiport)
         else:
             print('Max number of vertiports reached, additonal vertiports will not be added')
         return None 
-
 
     def set_vps_in_vp_list(self, vp_list:List[Vertiport]) -> None:
         for vp in vp_list:
@@ -191,7 +209,7 @@ class Airspace:
 
         return None
 
-    def get_vertiport_list(self) -> List:
+    def get_vertiport_list(self) -> List[Vertiport]:
         """
         Returns the list of vertiports.
 
@@ -200,12 +218,18 @@ class Airspace:
         """
         return self.vertiport_list
 
+    def get_vp_id_list(self,) -> List[int]:
+        '''Returns list of vertiport ids'''
+
+        vp_id_list = [vp.id for vp in self.vertiport_list]
+        return vp_id_list
+    
     def create_vertiport_at_location(self, location:Tuple)-> Vertiport:
         """Create a vertiport at position(x,y)."""
         position = Point(location[0], location[1])
         
         # if Airspace instance has defined restricted airspace 
-        if self.airspace_tag_list:
+        if self.airspace_restricted_area_tag_list:
             sample_space = self.location_utm_gdf['geometry'].iloc[0]
             for tag_value in self.location_tags.keys():
                 # sample_space_geoseries:GeoSeries = self.location_utm_gdf.iloc[0,0]
@@ -226,6 +250,16 @@ class Airspace:
             
         raise RuntimeError('Not a valid location')
 
+    def _convert_lat_long_xy(self, lat_long:Tuple[float, float]) -> Tuple[float, float]:
+        x,y = 0,0
+        # return x,y
+        raise NotImplementedError
+    
+    def create_vertiport_from_lat_long(self, lat_long:Tuple) -> Vertiport:
+        x,y = self._convert_lat_long_xy(lat_long)
+        vertiport = Vertiport(Point(x,y))
+        return vertiport 
+    
     def create_vertiport_from_polygon(self,polygon:Polygon) -> Vertiport:
         '''Given a polygon, find the centeroid of the polygon, 
         and place a vertiport at that polygon'''
@@ -241,18 +275,19 @@ class Airspace:
             vertiport_list.append(self.create_vertiport_from_polygon(polygon))
         return vertiport_list
 
-    def make_polygon_dict(self, tag_str) -> None:
+    def _make_polygon_dict(self, tag_str) -> None:
         # TODO: check if tag_str in tag_list
         # if True, then use tag_str as key for dict
 
-        '''Add polygons of specific "tag_str" to an instance dictionary called self.poly_dict.
+        '''Internal method for building vertiports using vertiport_tags. 
+        Add polygons of specific "tag_str" to an local dictionary.
         These polygons will be used to create vertiports using OSMNx tags'''
 
         #                                                               tag_str: 'commercial' etc.
         try:
             assert tag_str in self.vertiport_tags.keys()
         except:
-            raise AssertionError('airspace - make_polygon_dict() is not using correct tag_str')
+            raise AssertionError('airspace - _make_polygon_dict() is not using correct tag_str')
 
         self.polygon_dict[tag_str] = [obj for obj in self.vertiport_utm[tag_str].geometry if isinstance(obj, Polygon)]
 
@@ -287,7 +322,7 @@ class Airspace:
 
         return region_vertiport_dict
 
-    def sample_vertiport_from_region(self, region_dict:Dict[int, List[Vertiport]], n_sample_from_region:int = 1) -> List[Vertiport]:
+    def _sample_vertiport_from_region(self, region_dict:Dict[int, List[Vertiport]], n_sample_from_region:int = 1) -> List[Vertiport]:
         '''From the dictionary of regions with vertiports, 
         sample "n_sample_from_region" number of vertiports from vertiports list of that region'''
 
@@ -319,10 +354,10 @@ class Airspace:
             random.seed(self.seed)
             np.random.seed(self.seed)
 
-        if num_vertiports > self.number_of_vertiports:
-            raise RuntimeError('Exceeds vertiport number defined for initialization')
+        if num_vertiports > len(self.vertiport_list) - self.max_num_vps_airspace:
+            raise RuntimeError('Exceeds max vertiport number defined for airspace, reduce number of vertiports to be added to vertiport_list')
 
-        if self.airspace_tag_list:
+        if self.airspace_restricted_area_tag_list:
             sample_space = self.location_utm_gdf['geometry'].iloc[0]
             for tag_value in self.location_tags.keys():
                 sample_space = shapely.difference(sample_space, self.location_utm_buffer[tag_value].union_all())
@@ -353,7 +388,7 @@ class Airspace:
         except:
             AttributeError("Missing polygon_dict, __init__'s vertiport_tag_list is empty")
         # step 1 - makes self.poly_dict
-        self.make_polygon_dict(tag_str)
+        self._make_polygon_dict(tag_str)
         # step 2
         vertiport_list = self.create_vertiports_from_polygons(self.polygon_dict[tag_str])
 
@@ -366,7 +401,7 @@ class Airspace:
         #     print(f'Region {region} has {len(regions_dict[region])} vertiports')
 
         # step 5
-        self.vertiport_list += self.sample_vertiport_from_region(regions_dict, n_sample_from_region)
+        self.vertiport_list += self._sample_vertiport_from_region(regions_dict, n_sample_from_region)
 
         return None
 
@@ -379,7 +414,7 @@ class Airspace:
         except:
             AttributeError("Missing polygon_dict, __init__'s vertiport_tag_list is empty")
         # step 1 - makes self.poly_dict
-        self.make_polygon_dict(tag_str)
+        self._make_polygon_dict(tag_str)
         # step 2
         vertiport_list = self.create_vertiports_from_polygons(self.polygon_dict[tag_str])
         print('Adding vertiports to vertiport_list...')
@@ -437,18 +472,10 @@ class Airspace:
         vertiports = self.regions_dict[region]
         return vertiports
 
-    # def make_region_dict(self, vertiport_list:List[Vertiport], num_regions:int) -> Dict:
-    #     '''Return a dictionary, with keys as regions and values as list of vertiports of that region.
-    #     This will be used later to sample vertiport from each region'''
+    def remove_vp(self, vertiport):
+        '''remove vertiport from list'''
+        pass
 
-    #     region_vertiport_dict = {}
-    #     for region_id in range(num_regions):
-    #         region_vertiport_dict[region_id] = []
-    #         for vertiport in vertiport_list:
-    #             if vertiport.region == region_id:
-    #                 region_vertiport_dict[region_id].append(vertiport)
-
-    #     return region_vertiport_dict
 if __name__ == '__main__':
     print('Starting Airspace class instance ...')
     import time 
@@ -457,13 +484,12 @@ if __name__ == '__main__':
     
     airspace = Airspace(number_of_vertiports=28, #! what is the use of this argument/attr 
                         location_name="Austin, Texas, USA", 
-                        airspace_tag_list=[], 
+                        airspace_restricted_area_tag_list=[], 
                         vertiport_tag_list=[('building', 'commercial')])
     
     
-    print('Number of vertiports: ',airspace.number_of_vertiports)
+    print('Number of vertiports: ',airspace.max_num_vps_airspace)
     print('vertiport list: ', airspace.vertiport_list)
-    print('max vertiports: ', airspace.max_vp_airspace)
     print('polygon dict: ', airspace.polygon_dict)
     print()
     print(airspace.location_utm_gdf.crs)

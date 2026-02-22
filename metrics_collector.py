@@ -11,3 +11,11 @@ class MetricsCollector:
     def reset(self,):
         return None
     
+    def _calculate_metrics(self,):
+        return metrics
+    
+    def get_metrics(self,):
+        return self._calculate_metrics()
+    
+
+    

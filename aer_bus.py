@@ -21,9 +21,13 @@ class AerBus:
     """
     
     def __init__(self, mode: str = 'deployment'):
-        self.mode = mode  # 'training' or 'deployment'
+        self.mode = mode  # 'training' or 'deployment' # what is the purpose of mode ??
+        
+        # base controllers
         self.controllers: Dict[str, BaseController] = {}
         self.controller_manifests: Dict[str, ControllerManifest] = {}
+
+        # define external dynamics here 
         
         # For external controllers
         self.zmq_context = None

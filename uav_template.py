@@ -3,10 +3,7 @@ from typing import List, Dict, Tuple
 import math
 import numpy as np
 from shapely import Point
-
-from sensor_template import SensorTemplate
-from controller_template import ControllerTemplate
-from dynamics_template import DynamicsTemplate
+from vertiport import Vertiport
 
 class UAV_template(ABC):
     """
@@ -21,75 +18,100 @@ class UAV_template(ABC):
         radius (float): Radius of the UAV's physical body.
         nmac_radius (float): Radius for Near Mid-Air Collision (NMAC) detection.
         detection_radius (float): Radius for detecting other UAVs.
-        sensor (SensorTemplate): Sensor object to collect data about the environment.
-        dynamics (DynamicsTemplate): Dynamics model governing UAV's motion.
-        controller (ControllerTemplate): Controller object for UAV's decision-making.
-        mission_complete_distance (float): Distance threshold for mission completion.
-        current_speed (float): Current speed of the UAV.
-        current_position (Point): Current position of the UAV.
-        current_heading (float): Current heading of the UAV in radians.
     """
     
-    def __init__(self, controller, dynamics, sensor, radius, nmac_radius, detection_radius, body_frame_north, body_frame_east, body_frame_down):
+    def __init__(self, radius, nmac_radius, detection_radius, id_):
         """
         Initialize the UAV with its controller, dynamics, sensor, and parameters.
 
         Args:
-            controller (ControllerTemplate): Controller object for decision-making.
-            dynamics (DynamicsTemplate): Dynamics object governing motion.
-            sensor (SensorTemplate): Sensor object for environment sensing.
             radius (float): Radius of the UAV's physical body.
             nmac_radius (float): NMAC detection radius.
             detection_radius (float): Radius for detecting other UAVs.
         """
-        self.id = id(self) #id can be thought of as tail number -  need to convert/add new id that starts at 0 
-        # UAV dimension
-        self.radius = radius
+        # ID 
+        self._id = id(self) #id can be thought of as tail number -  need to convert/add new id that starts at 0 
+        self.id:str = id_ # this is the id that will be used when creating UAV and has strings like uav_0, uav_1 etc
+       
+        # UAV type 
+        self.type_name:str
+        
         # UAV sensor range
+        self.radius = radius
         self.nmac_radius = nmac_radius
         self.detection_radius = detection_radius
-        # UAV mission completion epsilon distance
-        self.mission_complete_distance = 40 # Increased from 10 to 40 to account for UAV overshotting goal between updates
         
-        # UAV constraints
-        self.max_heading_change = math.pi # Passed to DynamicsPointMass for action renormalization
-        self.max_speed = 80
-        self.max_acceleration = 1 # Passed to DynamicsPointMass for action renormalization
-        self.rotor_speed = 1 #! this is temp value, we need to find a way to calculate and update this method
+        # UAV physics limit - WILL BE EXTRACTED FROM CONFIG - REMOVE DEFAULT VALUE 
+        self.max_speed:float = 80
+        self.max_acceleration:float = 1 # Passed to DynamicsPointMass for action renormalization
+        self.max_heading_change:float = math.pi # Passed to DynamicsPointMass for action renormalization
         
         # UAV incidence counter/metric
-        self.nmac_count = 0
+        self.nmac_count:int = 0
+
+        # VERTIPORT DATA
+        self.start_vertiport: Vertiport
+        self.end_vertiport: Vertiport
+
+        # POSITION PLAN
+        self.mission_start_point:Point
+        self.mission_end_point:Point
+        self.plan_dict:Dict[str,List[Point]] # when UAV is initiated fill the waypoint with end, at each time step collect index 0 item and set as current_end_point, if current_end_point == end_point, run that new method which will reset attrs of UAV and keep the UAV in vertiport que attr
+        
+        self.current_position:Point
+        self.next_position:Point
+        
+        # VELOCITY PLAN
+        self.current_vel:Tuple
+        self.next_vel:Tuple
+        self.velocity_plan:Dict[str, List[Tuple]]
         
         # UAV kinematics state 
-        self.current_speed = 0
-        self.current_heading = 0
+        self.current_speed:float = 0
+        self.current_heading:float = 0
         
-        # body frame coordinate system 
-        self.n = body_frame_north
-        self.e = body_frame_east 
-        self.d = body_frame_down 
+        # UAV global vector state - for rendering position of UAV 
+        self.px:float 
+        self.py:float 
+        self.pz:float         
 
-        # dynamics
-        self.dynamics_type = None
+        # NED is simply the modified current location 
+        # modified_current_location = current location - map_centeroid
+        # NED frame helps simplify the calculations - thats all 
+        self.n:float 
+        self.e:float 
+        self.d:float 
+
+        self.vx:float 
+        self.vy:float 
+        self.vz:float 
         
-        # UAV vector state
-        self.px = None
-        self.py = None
-        self.pz = None
+        self.pitch:float
+        self.roll:float
+        self.yaw:float 
+
+        self.pitch_dot:float
+        self.roll_dot:float
+        self.yaw_dot:float
         
-        self.vx = None
-        self.vy = None
-        self.vz = None
+
+
+        # UAV mission completion epsilon distance
+        self.mission_complete_distance = 40 # Increased from 10 to 40 to account for UAV overshotting goal between updates
+        self.current_mission_complete_status: bool
         
-        # UAV will only carry state information - state information will be used for
-        # 1. sensor
-        # 2. dynamics
-        # 3. controller 
-        
-        # NO NEED of the following -    
-        # self.sensor: SensorTemplate = sensor
-        # self.dynamics: DynamicsTemplate = dynamics
-        # self.controller: ControllerTemplate = controller
+        # UAV operational_status
+        # mission_plan, path_plan,trajectory_plan can be added before new_mission/during uav_in_flight 
+        # once UAV reaches end point - many attrs of UAV are changes to OFF/False 
+        # have a new method update attrs once UAV reaches end, 
+        self.operational:bool 
+       
+        # UAV state - at vertiport or in flight 
+        self.uav_in_flight:bool #
+
+
+
+
         
         
 
@@ -110,8 +132,8 @@ class UAV_template(ABC):
 
 
         self.mission_complete_status = False
-        self.start = start
-        self.end = end
+        self.mission_start_point = start
+        self.mission_end_point = end
         self.current_position = start
         
         # ADDED odometer attr:
@@ -133,7 +155,7 @@ class UAV_template(ABC):
         Returns:
             bool: True if the UAV is within the mission completion distance from the target, False otherwise.
         """
-        if self.current_position.distance(self.end) <= self.mission_complete_distance:
+        if self.current_position.distance(self.mission_start_point) <= self.mission_complete_distance:
             mission_complete_status = True
         else:
             mission_complete_status = False
@@ -161,17 +183,17 @@ class UAV_template(ABC):
         ref_prll, ref_orth = self.get_ref()
         return {'id':self.id,
                 'current_position':self.current_position, #global position
-                'distance_to_end': self.start.distance(self.end), #mission_distance
-                'distance_covered': self.start.distance(self.current_position), #TODO: wrong def 
-                'distance_to_goal': self.current_position.distance(self.end),
-                'max_dist': self.start.distance(self.end),#mission_distance
+                'distance_to_end': self.mission_start_point.distance(self.mission_start_point), #mission_distance
+                'distance_covered': self.mission_start_point.distance(self.current_position), #TODO: wrong def 
+                'distance_to_goal': self.current_position.distance(self.mission_start_point),
+                'max_dist': self.mission_start_point.distance(self.mission_start_point),#mission_distance
                 'min_dist': 0,
                 'min_speed': 0,
                 'max_speed': self.max_speed, 
                 'current_speed': self.current_speed,
                 'current_heading': self.current_heading, # map_north - body_frame_north
                 'final_heading': self.final_heading, # goal_deviation = goal_vector - body_frame_north
-                'end':self.end,
+                'end':self.mission_start_point,
                 'radius': self.radius,
                 'ref_prll':ref_prll,
                 'ref_orth':ref_orth,
@@ -179,17 +201,16 @@ class UAV_template(ABC):
                 }
 
     @abstractmethod
-    def get_sensor_data(self) -> Tuple[List, List]:
+    def get_sensor_data(self):
         """
         Collect data from the sensor about other UAVs and restricted airspace in the environment.
 
         Returns:
             Tuple[List, List]: Sensor data about other UAVs, and restricted area data.
         """
-        
-        return self.sensor.get_data(self)
+        pass
 
-    def get_obs(self) -> Tuple[Dict, Tuple[List, List]]:  
+    def get_obs(self):  
         """
         Retrieve the observation, combining the UAV's state with sensor data.
 
@@ -204,8 +225,7 @@ class UAV_template(ABC):
         # add self obs with other_uav obs
         sensor_data = self.get_sensor_data()
         
-        return (own_data, sensor_data) # TODO: named tuple would be better for sensor data.
-
+        pass # TODO: named tuple would be better for sensor data.
 
     def get_ref(self):
         """
@@ -215,9 +235,9 @@ class UAV_template(ABC):
         Returns:
             Tuple[np.ndarray, np.ndarray]: Parallel and orthogonal reference directions.
         """
-        goal_dir = np.array([self.end.x - self.current_position.x, 
-                             self.end.y - self.current_position.y])
-        self.dist_to_goal = self.current_position.distance(self.end)
+        goal_dir = np.array([self.mission_start_point.x - self.current_position.x, 
+                             self.mission_start_point.y - self.current_position.y])
+        self.dist_to_goal = self.current_position.distance(self.mission_start_point)
 
         if self.dist_to_goal > 1e-8:
             ref_prll = goal_dir / self.dist_to_goal
@@ -237,5 +257,15 @@ class UAV_template(ABC):
         self.odometer_reading += distance
         self.previous_position = self.current_position
 
-        
+        def update_start_point(self,):
+            pass
+
+    def update_start_point(self,):
+        pass
+
+    def update_end_point(self,):
+        pass
+
+    def refresh_uav(self,):
+        pass
 

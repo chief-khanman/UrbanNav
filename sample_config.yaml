@@ -1,0 +1,53 @@
+# UAM Simulator Configuration
+# component_schema.py structure has to respect this config.yaml
+
+# new types can be added here
+# provide a class/name for uav, and its attrs as described
+
+
+#### CONFIG ####
+simulator:
+  dt: 1.0
+  total_timestep: 3000
+  mode: '2D' # or 3D - used for rendering and dynamics, controller and sensor check
+  seed: 123
+
+vertiport:
+  number_of_landing_pad: 4
+
+airspace:
+  location_name: 'Austin, Texas, USA'
+  number_of_vertiports: 10
+  vertiport_tag_list: [['building', 'commercial']]
+  airspace_restricted_area_tag_list: [['building', 'office']]
+
+
+
+# this whole section needs to communicate with AER_BUS and ATC
+# LEARNING is the only reserved type_name - strictly for UAV using RL controller during training phase
+fleet_composition:
+  - type_name: STANDARD
+    count: 6 # ATC handles id and type_name for dynamics, controller, and state update
+    dynamics: PointMass
+    controller: PID
+    sensor: PartialSensor # OR GlobalSensor
+
+  - type_name: HEAVY
+    count: 6
+    dynamics: SixDOF
+    controller: MARL
+    sensor: GlobalSensor
+
+  - type_name: LEARNING
+    count: 1 
+    dynamics: PointMass
+    controller: null  # null is valid for LEARNING type during training phase
+    sensor: GlobalSensor
+
+  - type_name: ORCA       # must match a key in VALID_UAVS / UAV_TYPE_REGISTRY in component_schema.py
+    count: 3
+    dynamics: ORCA
+    controller: ORCA
+    sensor: GlobalSensor
+
+#### CONFIG ####
