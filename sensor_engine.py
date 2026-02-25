@@ -17,10 +17,12 @@ from sensor_template import Sensor
 #    for each UAV create a dict mapping: uav_id -> [collision uav id ]
 
 class SensorEngine:
-    def __init__(self, config, uav_list):
+    def __init__(self, config, sensor_uav_map, uav_dict):
             self.config = config
-            self.uav_list = uav_list
-
+            self.sensor_uav_map = sensor_uav_map
+            self.uav_dict = uav_dict
+            
+            #! what is plan_dict doing here 
             self.plan_dict:Dict[str, Sensor]
         
 

@@ -8,9 +8,10 @@ from plan_template import PlannerTemplate
 
 class PlannerEngine:
 
-    def __init__(self, config, uav_list):
+    def __init__(self, config, plan_uav_map, uav_dict):
         self.config = config
-        self.uav_list = uav_list
+        self.plan_uav_map = plan_uav_map
+        self.uav_dict = uav_dict
 
         self.plan_dict:Dict[str, PlannerTemplate]
         pass

@@ -6,7 +6,7 @@ import multiprocessing as mp
 from queue import Queue, Empty
 import zmq
 from controller import BaseController, ControllerManifest
-from simulator_state import SimulatorState
+from component_schema import SimulatorState
 
 class ExecutionMode(Enum):
     INLINE = "inline"          # Controller runs in same process
@@ -20,7 +20,11 @@ class AerBus:
     Handles both training and deployment modes
     """
     
-    def __init__(self, mode: str = 'deployment'):
+    def __init__(self, config, controller_uav_map, uav_dict, mode: str = 'deployment'):
+        
+        self.config = config
+        self.controller_uav_map = controller_uav_map
+        self.uav_dict = uav_dict
         self.mode = mode  # 'training' or 'deployment' # what is the purpose of mode ??
         
         # base controllers
@@ -128,7 +132,7 @@ class AerBus:
         
         print(f"External controller {controller_id} listening on port {port}")
     
-    def step(self, current_state: SimulatorState) -> Dict[str, Dict[str, Any]]:
+    def get_actions(self, current_state: SimulatorState) -> Dict[str, Dict[str, Any]]:
         """
         Main step function - distribute state, collect actions
         
