@@ -10,10 +10,10 @@ class UAV(UAV_template):
                  detection_radius,
                  _id,
                  ):
-        super().__init__(radius, nmac_radius, detection_radius, _id)
+        super().__init__(radius, nmac_radius, detection_radius)
 
-    def assign_start_end(self, start, end):
-        return super().assign_start_end(start, end)
+    def assign_start_end(self, start, end, *args, **kwargs):
+        return super().assign_start_end(start, end, *args, **kwargs)
 
     def get_mission_status(self):
         return super().get_mission_status()
@@ -24,9 +24,9 @@ class UAV(UAV_template):
     def get_state(self):
         return super().get_state()
 
-    def get_sensor_data(self):
-        return super().get_sensor_data()
+    # def get_sensor_data(self):
+    #     return super().get_sensor_data()
 
-    def get_obs(self):
-        return super().get_obs()
+    # def get_obs(self):
+    #     return super().get_obs()
 
