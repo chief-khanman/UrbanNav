@@ -1,5 +1,6 @@
 from abc import ABC
 from typing import Dict, Any, List
+from uav_template import UAV_template
 from uav import UAV
 from component_schema import UAMConfig, VALID_DYNAMICS
 from dynamics_point_mass import PointMass
@@ -12,7 +13,7 @@ class DynamicsEngine:
     def __init__(self, 
                  config:UAMConfig, 
                  dynamics_uav_map:Dict[str, List[int]],
-                 uav_dict:Dict[int, UAV]):
+                 uav_dict:Dict[int, UAV|UAV_template]):
         self.config = config
         self.dt = self.config.simulator.dt
         # comes from atc.dynamics_map
