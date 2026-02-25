@@ -1,15 +1,26 @@
 from abc import ABC
 from typing import Dict, Any, List
-from component_schema import UAMConfig
-import uav_component_registry as uav_component_registry
+from uav import UAV
+from component_schema import UAMConfig, VALID_DYNAMICS
+from dynamics_point_mass import PointMass
+from dynamics_six_dof import SixDOF
+from dynamics_two_d_vector import TwoDVector
 # in the config file - 
 # dynamics mode and solver will be defined for use with DynamicsEngine()
 #  
 class DynamicsEngine:
-    def __init__(self, config:UAMConfig):
+    def __init__(self, 
+                 config:UAMConfig, 
+                 dynamics_uav_map:Dict[str, List[int]],
+                 uav_dict:Dict[int, UAV]):
         self.config = config
         self.dt = self.config.simulator.dt
-        self.dynamics_map: Dict[str, Any] = {}  # Maps UAV id to dynamics instance
+        # comes from atc.dynamics_map
+        self.dynamics_uav_map = dynamics_uav_map # dict: dynamics_str -> [id1, id2, ....]
+        # comes from atc
+        self.uav_dict = uav_dict # dict: 'id1': UAV, 'id2':UAV, ....
+        # not defined yet 
+        self.dynamics_str_obj_map = {} #dict: 'dyn_str' -> DynamicsObj
         # each uav in UAVs can have unique dynamics
         # 2D:
         #   1. point_mass
@@ -22,54 +33,31 @@ class DynamicsEngine:
         #   2. ...
 
 
-    def register_uav_dynamics(self, uav) -> None:
+    def register_uav_dynamics(self) -> None:
         """Register UAV's dynamics instance and 
         store the dynamics_model in a list/dict"""
-        
-        if hasattr(uav, 'dynamics') and uav.dynamics is not None:
-            self.dynamics_map[uav.id] = uav.dynamics
-        else:
-            raise ValueError(f"UAV {uav.id} missing dynamics instance")
+        #TODO: spin up dynamics modules that are present in simulation config 
+        # use the dynamics_uav_map to create instances of Dynamics
+        # and save them in dynamics_str_obj_map
+        # use VALID_DYNAMICS here 
 
-    # def register_all_uavs(self, uav_list) -> None:
-    #     """Register all UAVs' dynamics"""
-    #     for uav in uav_list:
-    #         self.register_uav_dynamics(uav)
 
-    # def step(self, current_state:SimulatorState, actions:Dict[str, Any], dt:float = None) -> None:
-    #     """Update all UAV states using their dynamics"""
-    #     dt = dt or self.dt
 
-    #     for uav in current_state.uavs:
-    #         if uav.id not in self.dynamics_map:
-    #             raise ValueError(f"No dynamics registered for UAV {uav.id}")
-
-    #         dynamics = self.dynamics_map[uav.id]
-    #         action = actions.get(uav.id)
-
-    #         if action is None:
-    #             # Default: maintain current state
-    #             action = [0.0, 0.0]
-
-    #         # Update UAV state (mutates in place)
-    #         dynamics.update(uav, action)
-
-    def step(self, uav_state, action:Dict[str, Any], dt:float) -> :
+    def step(self,actions_dict):
         """Update all UAV states using their dynamics"""
-        dt = dt or self.dt
-
-        #UAV state does not hold information about dynamics_model 
-        dynamics = self.dynamics_map[uav.id]
+        # action_dict: uav_id -> action
+        # dynamics_map: dynamics_model -> uav_id  
+        # UAV state does not hold information about dynamics_model 
+        for uav_id,action in actions_dict.items(): 
+            #! temporary 
+            if action is None:
+                # Default: maintain current state
+                # action = [0.0, 0.0]
+                raise RuntimeError('Action cannot be None')
+            
+            dynamics_model = self.dynamics_str_obj_map[uav_id]
+            dynamics_model.step(action, self.uav_dict[uav_id])
         
-        action = actions.get(uav.id)
-
-        if action is None:
-            # Default: maintain current state
-            action = [0.0, 0.0]
-
-        # Update UAV state (mutates in place)
-        dynamics.update(uav, action)
-
 
 
 #### FUTURE task - start ####
