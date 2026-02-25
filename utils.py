@@ -1,9 +1,9 @@
 import geopandas as gpd
 from matplotlib.axes._axes import Axes
-from uav import UAV_v2
+from uav import UAV_template
 import numpy as np
 
-def compute_time_to_impact(host_uav:UAV_v2, other_uav:UAV_v2):
+def compute_time_to_impact(host_uav:UAV_template, other_uav:UAV_template):
     host_pos = host_uav.current_position
     other_pos = other_uav.current_position
 
@@ -38,8 +38,8 @@ def compute_time_to_impact(host_uav:UAV_v2, other_uav:UAV_v2):
                 # agents aren't moving toward each other ==> inf TTC
                 return np.inf
 
-            px, py = host_pos
-            a, b = other_pos
+            px, py = host_pos.x, host_pos.y
+            a, b = other_pos.x, other_pos.y
             r = combined_radius
             if abs(v0) < 1e-5: # vertical v_rel (solve for y, x known)
                 print("[warning] v0=0, and not yet handled")
