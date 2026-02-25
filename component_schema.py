@@ -10,6 +10,7 @@ from shapely import Point
 
 from vertiport import Vertiport
 from uav_template import UAV_template
+from uav import UAV
 
 from dataclasses import dataclass, asdict
 import json
@@ -22,8 +23,9 @@ RESERVED_TYPE_LEARNING = 'LEARNING'
 # Valid string identifiers for each component type.
 # Dynamics, controller, sensor classes are wired separately once those modules are ready.
 VALID_DYNAMICS: set[str] = {'PointMass', 'SixDOF', 'TwoDVector', 'ORCA'}
-VALID_CONTROLLERS: set[str] = {'PID', 'LQR', 'MARL', 'ORCA', 'Static'}
+VALID_CONTROLLERS: set[str] = {'PID', 'LQR', 'MARL', 'ORCA', 'Static', 'RL'}
 VALID_SENSORS: set[str] = {'PartialSensor', 'GlobalSensor', 'MapSensor'}
+VALID_PLANNERS: set[str] = {'PointMass-PID', 'PointMass-RL', 'SixDOF-PID', 'SixDOF-LQR', 'N/A'}
 
 # UAV type registry — physical parameters live here in code, not in the yaml.
 # fleet_composition.type_name values must match a key in this dict.
@@ -121,8 +123,9 @@ class UAVFleetInstanceConfig(BaseModel):
     type_name: str          # must be a key in VALID_UAVS
     count: int
     dynamics: str           # must be a key in VALID_DYNAMICS
-    controller: Optional[str] = None  # None valid only for LEARNING type
+    controller: str  # None valid only for LEARNING type
     sensor: str             # must be a key in VALID_SENSORS
+    planner: str            # must be a key in VALID_PLANNERS
 
     @field_validator('type_name')
     @classmethod
@@ -212,8 +215,9 @@ class UAVBlueprint:
     type_name: str
     type_config: UAVTypeConfig
     dynamics_name: str
-    controller_name: Optional[str]
+    controller_name: str
     sensor_name: str
+    planner_name: str
 
 
 #TODO: this function needs to be placed in simulator_manager OR atc - later update
@@ -247,6 +251,7 @@ def build_fleet(config: UAMConfig) -> List[UAVBlueprint]:
                 dynamics_name=entry.dynamics,
                 controller_name=entry.controller,
                 sensor_name=entry.sensor,
+                planner_name=entry.planner
             ))
             global_index += 1
 
@@ -310,6 +315,7 @@ class UAVCommand:
 
 
 # Each UAV can receive one or more commands per step
+# access uav using str: uav_id, and pass List of ActionType-UAVCommand
 UAVCommandBundle = Dict[str, List[UAVCommand]]
 
 
@@ -317,9 +323,9 @@ UAVCommandBundle = Dict[str, List[UAVCommand]]
 class SimulatorState:
     """Complete state snapshot — can be serialized to JSON."""
     timestamp: float | str
-    step: int
+    currentstep: int
     airspace_state: List[Vertiport]     # Airspace type
-    atc_state: List[UAV_template]       # ATC type
+    atc_state: Dict[int, UAV_template|UAV]       # ATC type
     external_systems: Dict[str, Any]    # wind, obstacles, etc.
 
     def to_json(self) -> str:
