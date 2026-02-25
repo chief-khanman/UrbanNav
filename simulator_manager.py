@@ -67,23 +67,23 @@ class SimulatorManager:
         
         ### sensor ###
         # collision_detector for COLLISION DETECTION/RESOLUTION
-        self.sensor_module = SensorEngine(self.config, self.atc.uav_dict)
+        self.sensor_module = SensorEngine(self.config, self.atc.sensor_map, self.atc.uav_dict)
         
         # use config to send data to statemanager 
         ### Planner ###
-        self.planner_module = PlannerEngine(self.config, self.atc.uav_dict)
+        self.planner_module = PlannerEngine(self.config, self.atc.planner_map, self.atc.uav_dict)
         
         ### Controller ###
         # AER_BUS handles state export and action import
         # AER_BUS for NETWORKING 
         #! should controller take in plan
-        self.controller_module = AerBus(self.config, self.atc.uav_dict, mode='deployment') #! should I pass the CONFIG 
+        self.controller_module = AerBus(self.config, self.atc.controller_map, self.atc.uav_dict, mode='deployment') #! should I pass the CONFIG 
         
         ### Physics/Dynamics ###
         # Dynamics_Engine for PHYSICS CALCULATION 
         # make dynamics engine handle different kind/form of dynamics
         #! should dynamics take in controller_action 
-        self.dynamics_module = DynamicsEngine(self.config, self.atc.uav_dict) 
+        self.dynamics_module = DynamicsEngine(self.config, self.atc.dynamics_map, self.atc.uav_dict) 
           
     #! NEED to rework this function 
     def _build_assets(self,):
@@ -161,13 +161,13 @@ class SimulatorManager:
         4. atc_state
         5. external_systems
         '''
-        ##### update: current_state.STEP
+        # update: current_state.STEP
         self._state.currentstep += 1
 
-        ##### update: current_state.UAVs #####
-        ## STEPPER : control_action -> dynamics -> state update          
-        restricted_area_detect, uavs_detect, nmac, restricted_area_collision, uavs_collision = self.step_uavS(external_action_dict=external_control_actions_dict)
+        # stepS_uav: control_action -> dynamics -> state update          
+        restricted_area_detect, uavs_detect, nmac, restricted_area_collision, uavs_collision = self._step_uavS(external_action_dict=external_control_actions_dict)
 
+        #### ---------- ATC-UAV-Vertiport Mission Cycle ----------  ####
         #* PROCESS OF REACHING VERTIPROT
         #*            LEAVING VERTIPORT 
         #*            CHECKING SPACE AT VERTIPORT 
@@ -194,7 +194,8 @@ class SimulatorManager:
         for uav_id in self.atc.uav_dict.keys():
             self.atc.has_left_start_vertiport(uav_id)
             self.atc.has_reached_end_vertiport(uav_id) #! this function shall add the uav to vertiports landing queue
-
+        ####  ---------- ATC-UAV-Vertiport Mission Cycle ----------  ####
+        
         # update: current_state.EXTERNAL_SYSTEMS
             
         
@@ -241,7 +242,7 @@ class SimulatorManager:
 
         return {**internal_plans_dict, **updated_external_plans_dict} # since internal is already unpacked, the control actions from external should be a single dict that will be unpacked in return 
     
-    def step_uavS(self, external_action_dict: UAVCommandBundle) -> Tuple[Dict,Dict,Dict,Dict,Dict]:
+    def _step_uavS(self, external_action_dict: UAVCommandBundle) -> Tuple[Dict,Dict,Dict,Dict,Dict]:
         '''Bring all sort of updates and execute them in this function '''
         
 
@@ -261,6 +262,7 @@ class SimulatorManager:
 
         ### CHECK COLLISION ###
         #TODO: update collision module to return UAV_id list 
+        #TODO: when there is a collision - update - 1. atc.uav_dict, atc.dynamics_map, sensor_map, planner_map, controller_map
         # the uav_list needs to be updated here 
         detection_dict_restricted_area = self.sensor_module.get_detection_restricted_area() # <- pass uav_id_list
         detection_dict_uavS = self.sensor_module.get_detection_other_uavS()
