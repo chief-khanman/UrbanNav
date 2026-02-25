@@ -199,6 +199,8 @@ class ATC():
         
         # Assign start and end vertiports to the UAV
         uav.assign_start_end(start, end, self.airspace_mid_point_coord) #    
+        self._update_start_vertiport_of_uav(uav_id, start)
+        self._update_end_vertiport_of_uav(uav_id, end)
         return None
 
     #FIX: #### START ####
@@ -206,36 +208,7 @@ class ATC():
     # and sound modeling 
 
     
-    # NEED to run for every UAV at each step - unless i can change this to event driven 
-    def has_reached_end_vertiport(self, uav_id:int) -> None:
-        """Checks if a UAV has reached its end_vertiport.
-
-        This method checks if a UAV has reached its end_vertiport. If it did reach,
-        it calls the landing_procedure method to update relevant objects.
-
-        Args:
-            uav (UAV): The UAV object to check.
-
-        Returns:
-            None
-        """
-        uav = self.uav_dict[uav_id]
-        
-        if (uav.current_position.distance(uav.mission_end_point) <= uav.mission_complete_distance):
-            # uav.reached_end_vertiport = True
-            # space_avail = self.check_landing_space_vp()
-            # if not space_avail:
-            if not self.check_landing_space_vp(uav_id):
-            #   hold_at_vertiport(self, uav_id)
-                self.holding_pattern_at_vertiport(uav_id)   
-            else: 
-            #   _landing_procedure(self, landing_uav_id)
-            #   
-                self._landing_procedure(uav_id)
-
-        
-        return None
-        
+    
     def has_left_start_vertiport(self, uav_id:int) -> None:
         """Checks if a UAV has left its start_vertiport.
 
@@ -270,16 +243,55 @@ class ATC():
         """
         
         outgoing_uav = self.uav_dict[outgoing_uav_id]
-        
-        outgoing_uav_id = outgoing_uav.id_
-        # remove UAV from vertiport uav list 
-        # this will clear a space in vertiport's vertipad and allow new UAV to land
-        for uav in outgoing_uav.start_vertiport.uav_list:
-            if uav.id == outgoing_uav_id:
-                outgoing_uav.start_vertiport.uav_list.remove(uav)
+        outgoing_uav.start_vertiport.uav_id_list.remove(outgoing_uav_id)
 
         return None
+    
+    # NEED to run for every UAV at each step - unless i can change this to event driven 
+    def has_reached_end_vertiport(self, uav_id:int) -> None:
+        """Checks if a UAV has reached its end_vertiport.
 
+        This method checks if a UAV has reached its end_vertiport. If it did reach,
+        it calls the landing_procedure method to update relevant objects.
+
+        Args:
+            uav (UAV): The UAV object to check.
+
+        Returns:
+            None
+        """
+        uav = self.uav_dict[uav_id]
+        
+        if (uav.current_position.distance(uav.mission_end_point) <= uav.mission_complete_distance):
+            # uav.reached_end_vertiport = True
+            # space_avail = self.check_landing_space_vp()
+            # if not space_avail:
+            if not self.check_landing_space_vp(uav_id):
+            #   hold_at_vertiport(self, uav_id)
+                self.holding_pattern_at_vertiport(uav_id)   
+            else: 
+            #   _landing_procedure(self, landing_uav_id)
+                if uav in uav.end_vertiport.landing_queue:
+                    uav.end_vertiport.landing_queue.remove(uav_id)
+                self._landing_procedure(uav_id)
+
+        
+        return None
+    
+    def holding_pattern_at_vertiport(self, uav_id):
+        uav = self.uav_dict[uav_id]
+        
+        # add uav_id to END_vertiport's landing queue
+        uav.end_vertiport.landing_queue.append(uav_id)
+        
+        # update attrs of UAV for HOLDING STATUS 
+        uav.current_speed = 0
+        uav.current_vel = (0,0)
+        uav.current_position = uav.current_position
+        print(f'UAV {uav_id}holding at: {uav.current_position}')
+        #TODO: turn off sensors during hold - to avoid detection/nmac/collision
+        #raise PendingDeprecationWarning('This holding pattern will change')
+        
     def _landing_procedure(self, landing_uav_id: int) -> None:
         """
         Once a landing spot is confirmed at Vertiport,
@@ -296,18 +308,9 @@ class ATC():
         #
         # Add UAV to Vertiport 
         landing_vertiport = landing_uav.end_vertiport
-        landing_vertiport.uav_list.append(landing_uav)
+        landing_vertiport.uav_id_list.append(landing_uav_id)
         
-        #! this method is to zero out velocity and other attributes and keep the UAV stable at current vertiport
-        # function name refresh_uav needs to be changed to something more informative and intuitive 
-        # landing_uav.refresh_uav() 
-        new_mission = random.random() > 0.5 
-        if new_mission: 
-            end_vertiport = random.choice(self.airspace.vertiport_list)
-            start_vertiport = landing_vertiport
-            self.assign_mission_start_end_vertiport(landing_uav.id_, start_vertiport, end_vertiport)
-        else:
-            self.wait_at_vertiport(landing_uav.id_)
+
 
         return None
 
@@ -372,27 +375,21 @@ class ATC():
         return None
     
     def reassign_new_mission(self, uav_id:int):
-        # for now use a threshold to either assign new mission or wait at vertiport
-
-
-
-
         uav = self.uav_dict[uav_id]
         
         start_vertiport = uav.end_vertiport
-        self._update_end_vertiport_of_uav(uav_id, start_vertiport)
-
-        # selecting a random vertiport - needs correct logic for selecting new vertiport
         end_vertiport = random.choice(self.airspace.vertiport_list)
-        self._update_start_vertiport_of_uav(uav_id, end_vertiport)
+        self.assign_mission_start_end_vertiport(uav.id_, start_vertiport, end_vertiport)
+
+        
+
+
         return None
 
     def wait_at_vertiport(self,uav_id):
         uav = self.uav_dict[uav_id]
-        uav.start_vertiport, uav.end_vertiport = uav.end_vertiport, uav.end_vertiport
-
-        self._update_start_vertiport_of_uav(uav_id, uav.start_vertiport)
-        self._update_end_vertiport_of_uav(uav_id, uav.end_vertiport)
+        start_vertiport, end_vertiport = uav.end_vertiport, uav.end_vertiport
+        self.assign_mission_start_end_vertiport(uav_id, start_vertiport, end_vertiport)
         return None
 
     #### MISSION CONTROL ####
@@ -405,19 +402,11 @@ class ATC():
 
         uav = self.uav_dict[incoming_uav_id]
         landing_vp = uav.end_vertiport
-        if len(landing_vp.uav_list) < landing_vp.landing_takeoff_capacity:
+        if len(landing_vp.uav_id_list) < landing_vp.landing_takeoff_capacity:
             return True
         else:
             return False 
 
-    def holding_pattern_at_vertiport(self, uav_id):
-        uav = self.uav_dict[uav_id]
-        uav.current_speed = 0
-        uav.current_vel = (0,0)
-        uav.current_position = uav.current_position
-        print(f'UAV {uav_id}holding at: {uav.current_position}')
-        #TODO: turn off sensors during hold - to avoid detection/nmac/collision
-        raise PendingDeprecationWarning('This holding pattern will change')
 
     def assign_vertiports(self, assignment_type: str='random') -> None:
             """
@@ -496,3 +485,6 @@ class ATC():
     #   if take_off_queue():
     #       for uav in take_off_que:
     #           self.reassign_new_mission() 
+    #   elif landing_queue():
+
+    

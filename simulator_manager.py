@@ -165,51 +165,38 @@ class SimulatorManager:
         self._state.currentstep += 1
 
         ##### update: current_state.UAVs #####
-        ## STEPPER : control_action -> dynamics -> state update 
-        
-        # update: current_state.EXTERNAL_SYSTEMS
-        ##
-        
-        # loop through uav_id and get dynamics_model
-        # for uav_id_i: use dynamics_model with -> control_action uav_id_i 
-        # collect updated state 
-        # update state of uav_id_i 
+        ## STEPPER : control_action -> dynamics -> state update          
         restricted_area_detect, uavs_detect, nmac, restricted_area_collision, uavs_collision = self.step_uavS(external_action_dict=external_control_actions_dict)
 
-        ##### update: current_state.ATC_STATE #####
-        # atc_state.update() will loop through all the vertiports in atc
-        # for vertiport in atc.vertiport_list:
-        # if vertiport.queue is not empty:
-        # for uav in vertiport.queue:
+        #* PROCESS OF REACHING VERTIPROT
+        #*            LEAVING VERTIPORT 
+        #*            CHECKING SPACE AT VERTIPORT 
+        #*            HOLDING PATTERN 
+        #*            LANDING 
+        #*            TAKEOFF 
+        #*            NEW ASSIGNMENT 
+        #* all of the above task should be in parallel and asynchronous 
+        # check if there is any UAV waiting in landing_queue
+        for vertiport in self.airspace.vertiport_list:
+            if vertiport.get_landing_queue():
+                for uav_id in vertiport.get_landing_queue():
+                    self.atc.has_reached_end_vertiport(uav_id) 
+            # reassign mission for UAVs sitting at vertiports 
+            for uav_id in vertiport.uav_id_list:
+                new_mission =  random.random() > 0.5 
+                if new_mission:
+                    self.atc.reassign_new_mission(uav_id)
+                else:
+                    self.atc.wait_at_vertiport(uav_id) 
+
+        # handle UAVs that have reached vertiports
+        #                       or left vertiports 
         for uav_id in self.atc.uav_dict.keys():
             self.atc.has_left_start_vertiport(uav_id)
             self.atc.has_reached_end_vertiport(uav_id) #! this function shall add the uav to vertiports landing queue
-        
 
-        #TODO: Fix reassignment of mission to UAV 
-        ## UAV - ATC - VERTIPORT COMM : hold patter, etc
-        for vertiport in self.airspace.vertiport_list:
-            #! this function will 
-            # check if space is available for uav to land 
-            # if yes land UAV 
-            # elif trigger hold pattern  
-            if vertiport.landing_queue():
-                # assign new_mission/new_goal to uav   
-                landed_uav_id = vertiport.get_uav_list()
-                self.atc.reassign_new_mission(uav_id)
-        
-        ## UAV start tasks ##
-        # if multiple uavs start from the same vp do not throw collision detection 
-        # ...
-        ## UAV end task 
-        
-        ##### update: current_state.AIRSPACE #####
-        #TODO: Once UAVs at vertiports have been reassigned - the queues should update themselves automatically 
-        ##### update: current_state.VERTIPORTS #####
-        for vertiport in self.airspace.get_vertiport_list():
-            # if UAV landed at vertiport == True
-            # add UAV to vertiport queue 
-            vertiport.update_queue()
+        # update: current_state.EXTERNAL_SYSTEMS
+            
         
 
 
