@@ -1,13 +1,10 @@
 # train_rl_controller.py
 from stable_baselines3 import PPO
-from uam_simulator import UAMSimulator, UAMSimEnv
+from uam_simulator import UAMSimulator
+from single_agent_gym_env import UAMSimEnv
 
 # Create simulator
-sim = UAMSimulator(config={
-    'dt': 0.1,
-    'n_uavs': 4,
-    'mode': 'training'
-})
+sim = UAMSimulator(config='path/to/config')
 
 # Wrap in Gym environment
 env = UAMSimEnv(
