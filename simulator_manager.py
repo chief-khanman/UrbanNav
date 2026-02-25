@@ -8,6 +8,8 @@ from atc import ATC
 from uav import UAV
 from component_schema import UAMConfig
 from collision_detection import AdaptiveCollisionDetector
+from sensor_engine import SensorEngine
+from planner_engine import PlannerEngine
 from aer_bus import AerBus
 from dynamics_engine import DynamicsEngine
 from component_schema import UAVCommandBundle, ActionType, SimulatorState, build_fleet
@@ -62,84 +64,67 @@ class SimulatorManager:
     
     def _initiate_simulator_components(self,):
         ##### Core components #####
-        ##### Collision #####
+        
+        ### sensor ###
         # collision_detector for COLLISION DETECTION/RESOLUTION
-        self.collision_detector = AdaptiveCollisionDetector(
-                                                            sensor_radius=5.0,
-                                                            mode='3D'
-                                                            )
+        self.sensor_module = SensorEngine(self.config, self.atc.uav_dict)
         
         # use config to send data to statemanager 
+        ### Planner ###
+        self.planner_module = PlannerEngine(self.config, self.atc.uav_dict)
         
+        ### Controller ###
         # AER_BUS handles state export and action import
         # AER_BUS for NETWORKING 
-        self.aer_bus = AerBus(mode='deployment') 
+        #! should controller take in plan
+        self.controller_module = AerBus(self.config, self.atc.uav_dict, mode='deployment') #! should I pass the CONFIG 
         
-        ##### Physics/Dynamics #####
+        ### Physics/Dynamics ###
         # Dynamics_Engine for PHYSICS CALCULATION 
-        # Dynamics engine will ingest config.fleet_composition and create instances of active dynamics in config
-        self.dynamics_engine = DynamicsEngine(self.config) # make dynamics engine handle different kind/form of dynamics
-
-    
-    # WORKING:  --- Feb 19, 2026     
+        # make dynamics engine handle different kind/form of dynamics
+        #! should dynamics take in controller_action 
+        self.dynamics_module = DynamicsEngine(self.config, self.atc.uav_dict) 
+          
     #! NEED to rework this function 
-    
     def _build_assets(self,):
-        #### VP ####
-        
-        ## VP LIST ##
+        #### ----------- VP ----------- ####
         # create vertiports
         num_vp = self.config.airspace.number_of_vertiports * self.config.vertiport.number_of_landing_pad
         # change this method to build vertiports in different ways 
         self.airspace.add_n_random_vps_to_vplist(num_vertiports=num_vp)
-        # VP_LIST -> self.airspace.vertiport_list
+        
+        ## ----> VP_LIST <---- ##
+        # ----> self.airspace.vertiport_list <---- 
+        
         #TODO: store the created VPs in a database with low memory AND fast query, fetch, and update process - 
         ## VP ID LIST ## 
+        #! what is the use of this 
         self.sim_vp_id_list = self.airspace.get_vp_id_list()
-        #### UAV ####
+        
+        #### ----------- UAV ----------- ####
         self.uav_blueprints = build_fleet(self.config) # num_uav comes from total in fleet composition 
         # create uavs
-        self.atc.create_uav(self.uav_blueprints) 
-        # uav assignment - simulator_manager 
-        
-        ## UAV LIST  ##
         # use these uav_blueprints and build uavs using uav_template OR method from atc that builds UAVs from UAV blueprints
-        ## UAV ID LIST ##
-        # build a uav_id_list - the uav_id_list and uav_list need to be connected
-        # DURING SIMULATION ON THE UAV_id_LIST is carried, it will be used to access all the UAVs in UAV_LIST, and update their attrs
-        
-        # and connect them to atc.uav_list
-        
-        # build similar component like dynamics_engine that will handle sensor, planner, controller
-        # controller is already handled by aer_bus 
-        # build the dict that hold mapping from uav_id to dynamics, controller, and sensor 
-
-        # print and pause for user to verify the vertiports are correct and uavs are correct 
-
-
+        self.atc.create_uavS_from_blueprint(self.uav_blueprints) 
+        # assign vertiports to UAVs 
+        self.atc.assign_vertiports()
         # initiate external systems
         self.external_systems = self.initiate_external_systems()
 
-
-    
-    
-    
-
-    # WORKING:  --- Feb 19, 2026
-        
-    
     def _create_data_class_state(self,):
-        self.airspace_state = self.airspace.get_state()
+        self.airspace_state = self.airspace.get_state() #! change list vertiport -> dict[id:int, vp:Vertiport]
         self.atc_state = self.atc.get_state()
 
     def reset(self, ):
         self.timestamp = datetime.datetime.now().strftime('%m %d %Y -- %H:%M')
+        
         self.currentstep = 0
+        
         # dyn_engine, aer_bus, path_planner
         self._initiate_simulator_components()
         # airspace, atc, 
         self._initiate_simulator_assets()
-        # uav 
+        # uav  
         self._build_assets()
         # atc state, airspace state, ...
         self._create_data_class_state()
@@ -167,31 +152,8 @@ class SimulatorManager:
     def set_state(self, state):
         self._state = state
         return None
-    
-    def get_plan(self, ) -> Dict[str, List]:
-        '''Use uav_id to access planner_dict,
-        and extract plan for UAV and append to dict. '''
-        # plan structure: 'uav_id_xx': [(time, plan), (time, plan), ......]
-        plan_dict = {}
-        for uav_id in self.uav_dict.keys():
-            uav_plan = self.planner_dict[uav_id]
-            plan_dict[uav_id] = uav_plan
-        return plan_dict
-
-    def get_control_actions(self, plan_dict):
-        # loop through uav_id and get control_actions for each uav 
-        # action structure: 'uav_id_xx': [(time, action), (time, action), ......]
-        control_actions = {}
-        for uav_id in self.uav_ids:
-            controller = self.aer_bus.controllers[uav_id]
-            uav_state = self.uavs.get_uav(uav_id)
-            control_action = controller.compute_action(uav_state)
-            self.control_actions[uav_id] = control_action
-            control_actions[uav_id] = control_action
-        # store control actions in self._control_actions = {'uav_id_i': control_action}
-        return control_actions
    
-    def update_simulator_state(self, control_actions:Dict[str,float])->None:
+    def step(self, external_control_actions_dict:UAVCommandBundle)->None:
         '''Update 
         1. timestamp
         2. currentstep
@@ -200,137 +162,153 @@ class SimulatorManager:
         5. external_systems
         '''
         ##### update: current_state.STEP
-        current_state.step += 1
+        self._state.currentstep += 1
 
         ##### update: current_state.UAVs #####
-        # already updated using dynamics.step()
-
-        ##### update: current_state.AIRSPACE #####
-
-        ##### update: current_state.VERTIPORTS #####
-        for vertiport in current_state.vertiports:
-            # if UAV landed at vertiport == True
-            # add UAV to vertiport queue 
-            vertiport.update_queue()
+        ## STEPPER : control_action -> dynamics -> state update 
         
+        # update: current_state.EXTERNAL_SYSTEMS
+        ##
+        
+        # loop through uav_id and get dynamics_model
+        # for uav_id_i: use dynamics_model with -> control_action uav_id_i 
+        # collect updated state 
+        # update state of uav_id_i 
+        restricted_area_detect, uavs_detect, nmac, restricted_area_collision, uavs_collision = self.step_uavS(external_action_dict=external_control_actions_dict)
+
         ##### update: current_state.ATC_STATE #####
         # atc_state.update() will loop through all the vertiports in atc
         # for vertiport in atc.vertiport_list:
         # if vertiport.queue is not empty:
         # for uav in vertiport.queue:
-        # assign new_mission/new_goal to uav   
-        current_state.atc_state.update()
+        for uav_id in self.atc.uav_dict.keys():
+            self.atc.has_left_start_vertiport(uav_id)
+            self.atc.has_reached_end_vertiport(uav_id) #! this function shall add the uav to vertiports landing queue
+        
 
-
+        #TODO: Fix reassignment of mission to UAV 
+        ## UAV - ATC - VERTIPORT COMM : hold patter, etc
+        for vertiport in self.airspace.vertiport_list:
+            #! this function will 
+            # check if space is available for uav to land 
+            # if yes land UAV 
+            # elif trigger hold pattern  
+            if vertiport.landing_queue():
+                # assign new_mission/new_goal to uav   
+                landed_uav_id = vertiport.get_uav_list()
+                self.atc.reassign_new_mission(uav_id)
+        
         ## UAV start tasks ##
         # if multiple uavs start from the same vp do not throw collision detection 
         # ...
         ## UAV end task 
+        
+        ##### update: current_state.AIRSPACE #####
+        #TODO: Once UAVs at vertiports have been reassigned - the queues should update themselves automatically 
+        ##### update: current_state.VERTIPORTS #####
+        for vertiport in self.airspace.get_vertiport_list():
+            # if UAV landed at vertiport == True
+            # add UAV to vertiport queue 
+            vertiport.update_queue()
+        
 
-        ## collision_check
-
-        ## UAV - ATC - VERTIPORT COMM : hold patter, etc
-
-        ## STEPPER : control_action -> dynamics -> state update 
-
-        ##
 
         
-        ##### update: current_state.EXTERNAL_SYSTEMS #####
-        # loop through uav_id and get dynamics_model
-        # for uav_id_i: use dynamics_model with -> control_action uav_id_i 
-        # collect updated state 
-        # update state of uav_id_i 
-        for uav_id in uav_dict.keys():
-            uav = self.uavs.get_uav(uav_id)
-            
-            dynamics_model = self.dynamics_engine.get_dynamics_model(uav_id)
-            
-            dynamics_model.step(uav, action)
+    def map_actions_to_uavs(self, internal_actions_dict, external_ids_actions_dict:UAVCommandBundle) -> Dict:
+        '''This function will use internal actions dict and external_ids_actions_dict to form a complete action_dict'''
+        
 
-    def map_action_to_uavs(self, external_ids_actions_dict:Dict[str, Any]) -> None:
-        for uav_id, control_action in external_ids_actions_dict.items():
-            self.control_actions[uav_id] =  control_action 
+        #TODO:
+        # the control_action_dict will have UAVs with both internal_actions, and external_actions 
+        # map internal actions to internal uav_ids 
+        # map external actions to external uav_ids - like LEARNING  
+        # from the CommandBundle extract the CONTROL action 
+        #! fix the code below based on logic described above 
+        # need to unpack only the CONTROL action and place inside return elegantly 
+        # check if the implementation below is correct 
+        updated_external_actions_dict = {}
+        for uav_id, uav_command_list in external_ids_actions_dict.items():
+            for uav_command in uav_command_list:
+                if uav_command.action_type == ActionType.CONTROL:
+                    updated_external_actions_dict[uav_id] = uav_command.payload
 
-    #! POSSIBLE ENTRY FOR EXTERNAL ACTIONS 
-    def step(self, external_action_dict):
+        return {**internal_actions_dict, **updated_external_actions_dict} # since internal is already unpacked, the control actions from external should be a single dict that will be unpacked in return 
+
+    def map_plans_to_uavs(self, internal_plans_dict, external_ids_plans_dict:UAVCommandBundle)->Dict:
+        '''This function will use internal actions dict and external_ids_actions_dict to form a complete action_dict'''
+        
+
+        #TODO:
+        # the control_action_dict will have UAVs with both internal_actions, and external_actions 
+        # map internal actions to internal uav_ids 
+        # map external actions to external uav_ids - like LEARNING  
+        # from the CommandBundle extract the CONTROL action 
+        #! fix the code below based on logic described above 
+        # need to unpack only the CONTROL action and place inside return elegantly 
+        # check if the implementation below is correct 
+        updated_external_plans_dict = {}
+        for uav_id, uav_command_list in external_ids_plans_dict.items():
+            for uav_command in uav_command_list:
+                if uav_command.action_type == ActionType.MISSION_PLAN:
+                    updated_external_plans_dict[uav_id] = uav_command.payload
+
+        return {**internal_plans_dict, **updated_external_plans_dict} # since internal is already unpacked, the control actions from external should be a single dict that will be unpacked in return 
+    
+    def step_uavS(self, external_action_dict: UAVCommandBundle) -> Tuple[Dict,Dict,Dict,Dict,Dict]:
         '''Bring all sort of updates and execute them in this function '''
+        
+
+        #! WHERE IS THE UAV_ID TO UAV MAP
         ### MOVE UAV ###
-        plan_dict = self.get_plan()
         
-        control_actions = self.get_control_actions(plan_dict=plan_dict)
-        self. map_action_to_uavs(external_ids_actions_dict=external_action_dict)
+        # PLAN
+        plan_dict = self.planner_module.get_plans()
+        #updated_plan_dict = self.map_plans_to_uavs(plan_dict, external_ids_actions_dict=external_action_dict) 
         
-        self.update_simulator_state(control_actions)
+        # CONTROL ACTION
+        control_actions_dict = self.controller_module.get_actions(plan_dict)
+        updated_control_actions_dict = self.map_actions_to_uavs(control_actions_dict, external_ids_actions_dict=external_action_dict) 
+        
+        # DYNAMICS 
+        self.dynamics_module.step(actions_dict=updated_control_actions_dict)
 
         ### CHECK COLLISION ###
+        #TODO: update collision module to return UAV_id list 
         # the uav_list needs to be updated here 
-        self.collision_detector() # <- pass uav_id_list
-
+        detection_dict_restricted_area = self.sensor_module.get_detection_restricted_area() # <- pass uav_id_list
+        detection_dict_uavS = self.sensor_module.get_detection_other_uavS()
+        nmac_dict = self.sensor_module.get_nmac()
+        collision_dict_restricted_area = self.sensor_module.get_collision_restricted_area()
+        collision_dict_uavS = self.sensor_module.get_collision_uavS()
 
         ### REMOVE UAV ###
         # remove UAVs that have collided 
+        self.atc.remove_uavs_by_id(collision_dict_restricted_area)
+        self.atc.remove_uavs_by_id(collision_dict_uavS)
         # record their stats/metrics 
-
-        ### MISSION UPDATE UAV ###
-        # check uavs that have left vp 
-        # check uavs that have reached vp 
-        # check uavs that have reached vp - and vp has space to land 
-        # hold uavs at vp where no space to land
-        # assign new mission to uavs that are in vp
-
-    def dispatch_commands(self, commands: UAVCommandBundle):
-        for uav_id, cmd_list in commands.items():
-            for cmd in cmd_list:
-                match cmd.action_type:
-                    case ActionType.MISSION_PLAN:
-                        self.uavs[uav_id].set_mission_plan(cmd.payload)
-                    case ActionType.PATH:
-                        self.uavs[uav_id].set_path(cmd.payload)
-                    case ActionType.TRAJECTORY:
-                        self.uavs[uav_id].set_trajectory(cmd.payload)
-                    case ActionType.CONTROL:
-                        self.uavs[uav_id].set_control_action(cmd.payload)
-                    case _:
-                        raise ValueError(f"Unknown action type: {cmd.action_type}")
-
-
-    
-    ##### PLANNER ##### 
-    #TODO: create a planner class - with three sub classes MissionPlanner, PathPlanner, TrajectoryPlanner
-    # MisisonPlanner - 
-    # PathPlanner - 
-    # TrajectoryPlanner - 
-    def _initialize_uav_plan(self) -> None:
-        """Assign start/end vertiports to UAVs"""
         
-        strategy = self.config.atc.vertiport_init_strategy
-        uav_list = self.atc.get_uav_list()
-        vertiport_list = self.airspace.get_vertiport_list()
+        return detection_dict_restricted_area, detection_dict_uavS, nmac_dict, collision_dict_restricted_area, collision_dict_uavS
         
-        # mission plan 
-        if strategy == 'random':
-            for uav in uav_list:
-                start_vp = random.choice(vertiport_list)
-                end_vp = random.choice([vp for vp in vertiport_list if vp.id != start_vp.id])
-                #! lets create ATC_STATE and ATC - 
-                # atc will have functions 
-                # atc_state will be a data class 
-                #! update to ATC 
-                self.atc_state.assign_vertiport_uav(uav, start_vp, end_vp)
 
-        elif strategy == 'SOMETHING':
-            pass
-        # path plan 
-        # trajectory plan 
 
-    def update_uav_position_plan(self, plan_type:str, plan:List[Point]):
-        
-        uav.position_plan[plan_type] = plan
-        
-        return None
 
-    def update_uav_velocity_plan(self, plan_type, plan):
-        pass
 
-    ##### PLANNER ##### 
+
+
+    # do we directly add the command to the UAV
+    # OR do collect these external commands and then combine with internal commands and dispatch at the same time 
+    # def dispatch_commands(self, commands: UAVCommandBundle):
+    #     for uav_id, cmd_list in commands.items():
+    #         for cmd in cmd_list:
+    #             match cmd.action_type:
+    #                 case ActionType.MISSION_PLAN:
+    #                     self.planner_module.set_plans(uav_id, cmd.payload)
+    #                 case ActionType.PATH:
+    #                     self.planner_module.set_plans(uav_id, cmd.payload)
+    #                 case ActionType.TRAJECTORY:
+    #                     self.planner_module.set_plans(uav_id, cmd.payload)
+    #                 case ActionType.CONTROL:
+    #                     {uav_id:cmd.payload}
+    #                 case _:
+    #                     raise ValueError(f"Unknown action type: {cmd.action_type}")
+
