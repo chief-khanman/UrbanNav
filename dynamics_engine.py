@@ -95,7 +95,9 @@ class DynamicsEngine:
                 # action = [0.0, 0.0]
                 raise RuntimeError('Action cannot be None')
 
-            dynamics_model = self.dynamics_str_obj_map[uav_id]
+            #TODO: check code below to make sure about correct instantiation of the dynamics model with 'dt'
+            dynamics_model = self.dynamics_str_obj_map[uav_id](dt = self.dt)
+            #TODO: how to pass either the dynamics type to each individual model - so that attrs, functions are accessed properly in VS-Code
             dynamics_model.step(action, self.uav_dict[uav_id])
 
 
