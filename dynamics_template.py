@@ -14,3 +14,7 @@ class Dynamics(ABC):
             This method has side effects.
         '''
         return None
+    
+    @abstractmethod
+    def step(self, action, uav):
+        pass

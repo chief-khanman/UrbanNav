@@ -3,6 +3,7 @@ from typing import Dict, Any, List
 from uav_template import UAV_template
 from uav import UAV
 from component_schema import UAMConfig, VALID_DYNAMICS
+from dynamics_template import Dynamics
 from dynamics_point_mass import PointMass
 from dynamics_six_dof import SixDOF
 from dynamics_two_d_vector import TwoDVector
@@ -34,7 +35,9 @@ class DynamicsEngine:
         self.uav_dict = uav_dict
         # populated by register_uav_dynamics()
         # dict: uav_id(int) -> Dynamics instance
-        self.dynamics_str_obj_map: Dict[int, Any] = {}
+        # Typed as Dynamics (abstract base) so IDE can resolve .step() and other
+        # shared interface methods on every subclass without losing autocomplete.
+        self.dynamics_str_obj_map: Dict[int, Dynamics] = {}
         # each uav in UAVs can have unique dynamics
         # 2D:
         #   1. point_mass
@@ -55,13 +58,17 @@ class DynamicsEngine:
         when UAVs are created.  Only dynamics types actually referenced in the
         current config's fleet are instantiated — unused types are never created.
 
+        Each instance is created with the simulator's dt so all subclass step()
+        calls use the correct timestep without requiring dt to be passed at
+        call time.
+
         Populates dynamics_str_obj_map: { uav_id(int) -> Dynamics instance }
         which is keyed by uav_id so step() can resolve a model in O(1).
         """
         # Instantiate one Dynamics object per unique type present in this simulation.
         # VALID_DYNAMICS guards against unknown names; DYNAMICS_CLASS_MAP guards
         # against names that are valid but not yet implemented.
-        type_to_instance: Dict[str, Any] = {}
+        type_to_instance: Dict[str, Dynamics] = {}
         for dyn_name in self.dynamics_uav_map:
             if dyn_name not in VALID_DYNAMICS:
                 raise ValueError(
@@ -73,7 +80,11 @@ class DynamicsEngine:
                     f"Dynamics type '{dyn_name}' is valid but has no concrete "
                     f"implementation yet. Implemented types: {sorted(DYNAMICS_CLASS_MAP)}"
                 )
-            type_to_instance[dyn_name] = DYNAMICS_CLASS_MAP[dyn_name]()
+            # Construct instance then inject the simulator's dt so subclasses
+            # that call super().__init__() with the default (0.1) are corrected.
+            instance = DYNAMICS_CLASS_MAP[dyn_name]()
+            instance.dt = self.dt
+            type_to_instance[dyn_name] = instance
 
         # Fan out: map every uav_id to its shared Dynamics instance.
         # UAVs sharing the same dynamics type share the same object.
@@ -85,9 +96,9 @@ class DynamicsEngine:
 
     def step(self, actions_dict):
         """Update all UAV states using their dynamics"""
-        # action_dict: uav_id -> action
-        # dynamics_map: dynamics_model -> uav_id
-        # UAV state does not hold information about dynamics_model
+        # action_dict: uav_id(int) -> action
+        # dynamics_str_obj_map: uav_id(int) -> Dynamics instance (already constructed
+        #   with correct dt in register_uav_dynamics — retrieve, do not re-instantiate)
         for uav_id, action in actions_dict.items():
             #! temporary
             if action is None:
@@ -95,9 +106,10 @@ class DynamicsEngine:
                 # action = [0.0, 0.0]
                 raise RuntimeError('Action cannot be None')
 
-            #TODO: check code below to make sure about correct instantiation of the dynamics model with 'dt'
-            dynamics_model = self.dynamics_str_obj_map[uav_id](dt = self.dt)
-            #TODO: how to pass either the dynamics type to each individual model - so that attrs, functions are accessed properly in VS-Code
+            # Retrieve the pre-built Dynamics instance for this UAV.
+            # dynamics_str_obj_map values are instances (not classes), so no
+            # call with dt here — dt was set at registration time.
+            dynamics_model: Dynamics = self.dynamics_str_obj_map[uav_id]
             dynamics_model.step(action, self.uav_dict[uav_id])
 
 
