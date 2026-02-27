@@ -46,9 +46,9 @@ class UAV_template(ABC):
         self.detection_radius = detection_radius
         
         # UAV physics limit - WILL BE EXTRACTED FROM CONFIG - REMOVE DEFAULT VALUE 
-        self.max_speed:float = 80
+        self.max_speed:float = 30.0
         self.max_velocity:float
-        self.max_acceleration:float = 1 # Passed to DynamicsPointMass for action renormalization
+        self.max_acceleration:float = 5.0 # Passed to DynamicsPointMass for action renormalization
         self.max_heading_change:float = math.pi # Passed to DynamicsPointMass for action renormalization
         self.max_lateral_acceleration: float = 9.8 #m/s^2 (approx 1G turn limit)
         
