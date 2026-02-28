@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-
+from typing import Any
 
 
 
@@ -10,7 +10,7 @@ class Controller(ABC):
         self.mode:str
 
     @abstractmethod 
-    def get_control_action(self):
+    def get_control_action(self, *args, **kwargs) -> Any:
         pass
 
     @abstractmethod
