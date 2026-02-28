@@ -2,7 +2,7 @@ import numpy as np
 from controller_template import Controller
 
 
-class PointMassController(Controller):
+class PIDPointMassController(Controller):
     def __init__(self):
         # Gains for Speed (Proportional only for simplicity)
         self.Kp_speed = 0.5
