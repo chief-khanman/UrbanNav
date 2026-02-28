@@ -1,9 +1,10 @@
+from abc import ABC
+from typing import Any
 
 
 
-
-class PlannerTemplate:
-    def __init__(self, ):
+class PlannerTemplate(ABC):
+    def __init__(self, *args, **kwargs):
         pass
 
     def mission_plan(self, *args, **kwargs):
@@ -15,7 +16,7 @@ class PlannerTemplate:
     def trajectory_plan(self, *args, **kwargs):
         pass
 
-    def get_plans(self, *args, **kwargs):
+    def get_plan(self, *args, **kwargs) -> Any:
         pass 
 
     def get_velocity_plan(self, *args, **kwargs):
