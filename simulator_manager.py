@@ -129,7 +129,11 @@ class SimulatorManager:
         # atc state, airspace state, ...
         self._create_data_class_state()
         
-        
+        self.sensor_module.register_uav_sensors()
+        self.planner_module.register_uav_planners()
+        self.controller_module.register_uav_controllers()
+        self.dynamics_module.register_uav_dynamics()
+
         #! why do i need this 
         # state 
         self._state = SimulatorState(self.timestamp,
