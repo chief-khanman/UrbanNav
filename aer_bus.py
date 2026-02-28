@@ -1,12 +1,18 @@
 from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, asdict
 import json
 from enum import Enum
 import multiprocessing as mp
 from queue import Queue, Empty
 import zmq
-from controller import BaseController, ControllerManifest
-from component_schema import SimulatorState
+from component_schema import VALID_CONTROLLERS
+from controller_template import Controller
+from controller_pid_point_mass import PIDPointMassController
+
+
+CONTROLLER_CLASS_MAP: Dict[str, type] = {
+    'PIDPointMassController': PIDPointMassController, 
+    # other controllers will be defined here 
+}
 
 class ExecutionMode(Enum):
     INLINE = "inline"          # Controller runs in same process
@@ -23,15 +29,21 @@ class AerBus:
     def __init__(self, config, controller_uav_map, uav_dict, mode: str = 'deployment'):
         
         self.config = config
-        self.controller_uav_map = controller_uav_map
+        # mappping: uav_id -> UAV 
         self.uav_dict = uav_dict
+        # mapping: Controller_str -> [uav_id1, uav_id2, ...], other_controller_str -> [uav_id4, uav_id5, ....]
+        self.controller_uav_map = controller_uav_map
+
+        # mapping: controller_str -> (internal)Controller
         self.mode = mode  # 'training' or 'deployment' # what is the purpose of mode ??
         
-        # base controllers
-        self.controllers: Dict[str, BaseController] = {}
-        self.controller_manifests: Dict[str, ControllerManifest] = {}
 
-        # define external dynamics here 
+        #TODO: 
+        # need to clarify different controller types and who will use which source - base(internal)/external/process 
+        # also need to clarify the RL in training and RL during evaluation 
+        
+        # base(internal) controllers
+        self.controllers: Dict[str, Controller] = {}
         
         # For external controllers
         self.zmq_context = None
@@ -41,21 +53,13 @@ class AerBus:
         self.process_queues = {}
         self.processes = {}
         
-        # State management
-        self.current_state: Optional[SimulatorState] = None
-        
-        # Action merging strategy
-        self.action_merger = ActionMerger()
     
     def register_controller(self, 
-                          controller: BaseController,
+                          controller: Controller,
                           mode: ExecutionMode = ExecutionMode.INLINE):
         """Register a controller with the bus"""
         
-        manifest = controller.manifest
-        controller_id = manifest.controller_id
-        
-        self.controller_manifests[controller_id] = manifest
+
         
         if mode == ExecutionMode.INLINE:
             # Store controller directly
@@ -70,6 +74,24 @@ class AerBus:
             self._setup_external_socket(controller_id)
         
         print(f"Registered controller: {controller_id} in {mode.value} mode")
+
+    #TODO: how to resolve registering all the internal controllers 
+    def register_uav_controllers(self,):
+
+        # pseudo code
+        # check if UAV has correct controller defined in VALID_CONTROLLERS
+        # check if UAV has correct controller with mapping defined in CONTROLLER_CLASS_MAP
+        # register controller - this is the extra part compared to dynamics, planner, and sensor
+        #       if internal controller - register using internal_controller_registration method
+        #       if external controller - same for external 
+        #       if separate python process - same but for python process 
+        # WHAT DOES REGISTRATION DO - 
+        # no matter what the controller - 1. create the instance  
+        #                                 2. map uav_id to instance 
+
+        
+        #TODO: is this the correct way to use the function ??
+        self.register_controller()
     
     def _spawn_controller_process(self, controller: BaseController):
         """Spawn controller in separate process"""
@@ -132,24 +154,25 @@ class AerBus:
         
         print(f"External controller {controller_id} listening on port {port}")
     
-    def get_actions(self, current_state: SimulatorState) -> Dict[str, Dict[str, Any]]:
+    #TODO: what should be the correct return signature - once plan_dict is handed to get_actions(), it will use that plan and compare against uav current attrs to generate control actions
+    def get_actions(self, plan_dict) -> Dict[int, Any]: 
         """
         Main step function - distribute state, collect actions
         
         Returns:
             Dict mapping UAV IDs to aggregated actions
         """
-        self.current_state = current_state
+        
         
         # Collect actions from all controllers
         all_actions = {}
         
         # 1. Inline controllers (fastest)
         for controller_id, controller in self.controllers.items():
-            manifest = self.controller_manifests[controller_id]
+            
             
             # Filter state for this controller
-            obs = current_state.filter_for_controller(manifest)
+            obs = 
             
             # Get action
             action = controller.compute_action(obs)
@@ -225,61 +248,8 @@ class AerBus:
             self.zmq_context.term()
 
 
-class ActionMerger:
-    """Handles conflicts when multiple controllers affect same UAV"""
-    
-    def merge(self, 
-              all_actions: Dict[str, Dict[str, Any]],
-              manifests: Dict[str, ControllerManifest]) -> Dict[str, Any]:
-        """
-        Merge actions from multiple controllers
-        
-        Strategy:
-        1. Direct control (RL, LQR) takes precedence
-        2. ATC directives modify control if safe
-        3. External systems (wind) are additive
-        """
-        
-        merged = {}
-        
-        # Priority levels
-        direct_control = {}  # Highest priority
-        directives = {}      # Medium priority
-        external = {}        # Additive
-        
-        for controller_id, actions in all_actions.items():
-            manifest = manifests[controller_id]
-            
-            if manifest.output_type in ['action', 'control']:
-                direct_control.update(actions)
-            elif manifest.output_type == 'directive':
-                directives.update(actions)
-            elif manifest.output_type == 'external':
-                external.update(actions)
-        
-        # Merge: direct control + directives (if compatible) + external
-        merged = direct_control.copy()
-        
-        # Apply directives that don't conflict
-        for uav_id, directive in directives.items():
-            if uav_id not in merged:
-                merged[uav_id] = directive
-            else:
-                # Merge directive with existing control
-                merged[uav_id] = self._merge_directive(
-                    merged[uav_id], directive
-                )
-        
-        # Add external effects (e.g., wind disturbance)
-        for uav_id, external_effect in external.items():
-            if uav_id in merged:
-                merged[uav_id]['external_disturbance'] = external_effect
-        
-        return merged
-    
-    def _merge_directive(self, control, directive):
-        """Merge ATC directive with low-level control"""
-        # Example: ATC says "climb", modify thrust accordingly
-        if directive.get('type') == 'altitude_change':
-            control['target_altitude'] = directive['target_altitude']
-        return control
+#* ActionMerger -
+# For future version of UrbanNav 
+# Feature of ActionMerger will resolve conflict when multiple controllers are sending action to same UAV 
+# There will be a priority list 
+# and based on that we will select the action for the UAV  
