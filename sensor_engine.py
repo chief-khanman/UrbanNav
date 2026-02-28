@@ -27,6 +27,9 @@ class SensorEngine:
         
 
 
+    def register_uav_sensors(self, *args, **kwargs):
+         pass
+
     def get_detection_restricted_area(self, *args, **kwargs) -> Dict:
         ''''''
         detection_dict = {}

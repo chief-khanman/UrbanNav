@@ -39,7 +39,7 @@ class PlannerEngine:
         # Unlike DynamicsEngine (one instance per type), each UAV gets its own
         # planner instance because planners are stateful — they track each UAV's
         # waypoint progress independently.
-        self.plan_str_obj_map: Dict[int, PlannerTemplate] = {}
+        self.plan_obj_map: Dict[int, PlannerTemplate] = {}
 
         self.plan_dict: Dict[int, List[Point]] = {}
 
@@ -56,7 +56,7 @@ class PlannerEngine:
         UAVs are created. Each planner is initialised with waypoints derived from the
         UAV's assigned start and end vertiports.
 
-        Populates plan_str_obj_map: { uav_id(int) -> PlannerTemplate instance }
+        Populates plan_obj_map: { uav_id(int) -> PlannerTemplate instance }
         which is keyed by uav_id so get_plans() can resolve a model in O(1).
         """
         for plan_name, uav_id_list in self.plan_uav_map.items():
@@ -75,7 +75,7 @@ class PlannerEngine:
                 uav = self.uav_dict[uav_id]
                 waypoints = [uav.start_vertiport.location, uav.end_vertiport.location]
                 instance = PLANNER_CLASS_MAP[plan_name](waypoints=waypoints)
-                self.plan_str_obj_map[uav_id] = instance
+                self.plan_obj_map[uav_id] = instance
 
     #TODO: get_plans() will need to be updated - return should not be List[Points], return should be List[Tuple[Point|float]]
     #TODO:  because get_plans will include not just position, it can also include, pitch,roll, yaw, vx,vy,vz, and ddot_pitch, ddot_roll, ddot_yaw
@@ -88,7 +88,7 @@ class PlannerEngine:
         Returns:
             plan_dict: { uav_id(int) -> List[Point] } current plan for each UAV.
         """
-        for uav_id, plan_model in self.plan_str_obj_map.items():
+        for uav_id, plan_model in self.plan_obj_map.items():
             uav = self.uav_dict[uav_id]
             self.plan_dict[uav_id] = plan_model.get_plan(uav.current_position)
         return self.plan_dict

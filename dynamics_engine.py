@@ -37,7 +37,7 @@ class DynamicsEngine:
         # dict: uav_id(int) -> Dynamics instance
         # Typed as Dynamics (abstract base) so IDE can resolve .step() and other
         # shared interface methods on every subclass without losing autocomplete.
-        self.dynamics_str_obj_map: Dict[int, Dynamics] = {}
+        self.dynamics_obj_map: Dict[int, Dynamics] = {}
         # each uav in UAVs can have unique dynamics
         # 2D:
         #   1. point_mass
@@ -62,7 +62,7 @@ class DynamicsEngine:
         calls use the correct timestep without requiring dt to be passed at
         call time.
 
-        Populates dynamics_str_obj_map: { uav_id(int) -> Dynamics instance }
+        Populates dynamics_obj_map: { uav_id(int) -> Dynamics instance }
         which is keyed by uav_id so step() can resolve a model in O(1).
         """
         # Instantiate one Dynamics object per unique type present in this simulation.
@@ -91,13 +91,13 @@ class DynamicsEngine:
         for dyn_name, uav_id_list in self.dynamics_uav_map.items():
             dyn_obj = type_to_instance[dyn_name]
             for uav_id in uav_id_list:       # uav_id is int (set by atc._set_uav)
-                self.dynamics_str_obj_map[uav_id] = dyn_obj
+                self.dynamics_obj_map[uav_id] = dyn_obj
 
 
     def step(self, actions_dict):
         """Update all UAV states using their dynamics"""
         # action_dict: uav_id(int) -> action
-        # dynamics_str_obj_map: uav_id(int) -> Dynamics instance (already constructed
+        # dynamics_obj_map: uav_id(int) -> Dynamics instance (already constructed
         #   with correct dt in register_uav_dynamics — retrieve, do not re-instantiate)
         for uav_id, action in actions_dict.items():
             #! temporary
@@ -107,9 +107,9 @@ class DynamicsEngine:
                 raise RuntimeError('Action cannot be None')
 
             # Retrieve the pre-built Dynamics instance for this UAV.
-            # dynamics_str_obj_map values are instances (not classes), so no
+            # dynamics_obj_map values are instances (not classes), so no
             # call with dt here — dt was set at registration time.
-            dynamics_model: Dynamics = self.dynamics_str_obj_map[uav_id]
+            dynamics_model: Dynamics = self.dynamics_obj_map[uav_id]
             dynamics_model.step(action, self.uav_dict[uav_id])
 
 
