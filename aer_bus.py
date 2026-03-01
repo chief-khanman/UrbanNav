@@ -1,255 +1,311 @@
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Set, Tuple
 import json
 from enum import Enum
 import multiprocessing as mp
-from queue import Queue, Empty
+from queue import Empty
 import zmq
 from component_schema import VALID_CONTROLLERS
 from controller_template import Controller
 from controller_pid_point_mass import PIDPointMassController
 
 
+# Maps controller name strings (from VALID_CONTROLLERS / ATC.controller_map keys)
+# to their concrete Controller subclass. Add new inline controllers here.
 CONTROLLER_CLASS_MAP: Dict[str, type] = {
-    'PIDPointMassController': PIDPointMassController, 
-    # other controllers will be defined here 
+    'PIDPointMassController': PIDPointMassController,
 }
 
+# Controller names that signal "RL training mode" — no internal action is generated;
+# the gym environment supplies actions via external_actions in SimulatorManager.step().
+RL_CONTROLLER_NAMES: Set[str] = {'RL'}
+
+
 class ExecutionMode(Enum):
-    INLINE = "inline"          # Controller runs in same process
-    PROCESS = "process"        # Controller in separate Python process
-    EXTERNAL = "external"      # Controller via ZeroMQ
+    INLINE = "inline"       # Controller runs in same Python process
+    PROCESS = "process"     # Controller in separate Python subprocess (multiprocessing.Queue)
+    EXTERNAL = "external"   # Controller in remote process/machine (ZeroMQ REQ-REP)
 
 
 class AerBus:
     """
-    Central message router and controller orchestrator
-    Handles both training and deployment modes
+    Central controller orchestrator for UrbanNav.
+
+    Supports three execution modes:
+      - INLINE:   controller defined in simulator codebase, called directly each step
+      - PROCESS:  controller in a spawned subprocess, communicates via multiprocessing.Queue
+      - EXTERNAL: controller in a remote process (e.g. MATLAB, C++, ORCA-RVO2),
+                  communicates via ZeroMQ REQ-REP sockets
+
+    RL training mode:
+      When a UAV's controller_name is in RL_CONTROLLER_NAMES, AerBus skips action
+      generation for that UAV. The gym environment supplies actions via
+      external_actions in SimulatorManager.step(), which are merged with internal
+      actions via map_actions_to_uavs() before being dispatched to DynamicsEngine.
     """
-    
-    def __init__(self, config, controller_uav_map, uav_dict, mode: str = 'deployment'):
-        
+
+    def __init__(self, config, controller_uav_map: Dict[str, List[int]],
+                 uav_dict: Dict[int, Any], mode: str = 'deployment'):
+
         self.config = config
-        # mappping: uav_id -> UAV 
+        # mapping: uav_id -> UAV object
         self.uav_dict = uav_dict
-        # mapping: Controller_str -> [uav_id1, uav_id2, ...], other_controller_str -> [uav_id4, uav_id5, ....]
+        # mapping: controller_name_str -> [uav_id1, uav_id2, ...] (from ATC.controller_map)
         self.controller_uav_map = controller_uav_map
 
-        # mapping: controller_str -> (internal)Controller
-        self.mode = mode  # 'training' or 'deployment' # what is the purpose of mode ??
-        
+        # INLINE controllers: uav_id -> Controller instance (one per UAV, stateful)
+        self.controller_obj_map: Dict[int, Controller] = {}
 
-        #TODO: 
-        # need to clarify different controller types and who will use which source - base(internal)/external/process 
-        # also need to clarify the RL in training and RL during evaluation 
-        
-        # base(internal) controllers
-        self.controllers: Dict[str, Controller] = {}
-        
-        # For external controllers
+        # PROCESS controllers: controller_name -> [uav_ids]
+        self.process_uav_map: Dict[str, List[int]] = {}
+        self.process_queues: Dict[str, Dict[str, mp.Queue]] = {}
+        self.processes: Dict[str, mp.Process] = {}
+
+        # EXTERNAL (ZeroMQ) controllers: controller_name -> {socket, port, uav_ids}
         self.zmq_context = None
-        self.external_sockets = {}
-        
-        # For process-based controllers
-        self.process_queues = {}
-        self.processes = {}
-        
-    
-    def register_controller(self, 
-                          controller: Controller,
-                          mode: ExecutionMode = ExecutionMode.INLINE):
-        """Register a controller with the bus"""
-        
+        self.external_sockets: Dict[str, Dict] = {}
 
-        
+        # RL UAVs: actions come from gym via external_actions, skip in get_actions()
+        self.rl_uav_ids: Set[int] = set()
+
+    # ------------------------------------------------------------------
+    # Registration
+    # ------------------------------------------------------------------
+
+    def register_controller(self, controller_name: str, uav_ids: List[int],
+                             mode: ExecutionMode,
+                             instance: Optional[Controller] = None) -> None:
+        """
+        Low-level wiring primitive. Wires one controller (by name and mode) to
+        the given UAV IDs. Called by register_uav_controllers() and can also be
+        called at runtime to add a controller mid-simulation.
+
+        Args:
+            controller_name: String key identifying the controller type.
+            uav_ids:         List of UAV IDs this controller is responsible for.
+            mode:            ExecutionMode (INLINE, PROCESS, or EXTERNAL).
+            instance:        Pre-built Controller object (required for INLINE).
+        """
         if mode == ExecutionMode.INLINE:
-            # Store controller directly
-            self.controllers[controller_id] = controller
-        
+            if instance is None:
+                raise ValueError(f'INLINE mode requires a Controller instance '
+                                 f'for controller "{controller_name}"')
+            for uav_id in uav_ids:
+                self.controller_obj_map[uav_id] = instance
+
         elif mode == ExecutionMode.PROCESS:
-            # Spawn separate process
-            self._spawn_controller_process(controller)
-        
+            self._spawn_controller_process(controller_name, instance, uav_ids)
+            self.process_uav_map[controller_name] = uav_ids
+
         elif mode == ExecutionMode.EXTERNAL:
-            # Setup ZeroMQ socket for external script
-            self._setup_external_socket(controller_id)
-        
-        print(f"Registered controller: {controller_id} in {mode.value} mode")
+            self._setup_external_socket(controller_name)
+            self.external_sockets[controller_name]['uav_ids'] = uav_ids
 
-    #TODO: how to resolve registering all the internal controllers 
-    def register_uav_controllers(self,):
+        print(f'[AerBus] Registered "{controller_name}" in {mode.name} mode '
+              f'for UAVs: {uav_ids}')
 
-        # pseudo code
-        # check if UAV has correct controller defined in VALID_CONTROLLERS
-        # check if UAV has correct controller with mapping defined in CONTROLLER_CLASS_MAP
-        # register controller - this is the extra part compared to dynamics, planner, and sensor
-        #       if internal controller - register using internal_controller_registration method
-        #       if external controller - same for external 
-        #       if separate python process - same but for python process 
-        # WHAT DOES REGISTRATION DO - 
-        # no matter what the controller - 1. create the instance  
-        #                                 2. map uav_id to instance 
+    def register_uav_controllers(self) -> None:
+        """
+        Batch orchestrator called once by SimulatorManager.reset().
 
-        
-        #TODO: is this the correct way to use the function ??
-        self.register_controller()
-    
-    def _spawn_controller_process(self, controller: BaseController):
-        """Spawn controller in separate process"""
-        controller_id = controller.manifest.controller_id
-        
-        # Create communication queues
+        Iterates over controller_uav_map (populated by ATC._set_uav()), determines
+        the execution mode for each controller name, creates instances, and
+        delegates wiring to register_controller().
+
+        Mirrors the pattern of DynamicsEngine.register_uav_dynamics() and
+        PlannerEngine.register_uav_planners().
+        """
+        for controller_name, uav_id_list in self.controller_uav_map.items():
+
+            if controller_name not in VALID_CONTROLLERS:
+                raise ValueError(
+                    f'Unknown controller "{controller_name}". '
+                    f'Valid options: {sorted(VALID_CONTROLLERS)}'
+                )
+
+            if controller_name in RL_CONTROLLER_NAMES:
+                # RL training mode: no internal action generation.
+                # The gym environment will supply actions via external_actions.
+                for uav_id in uav_id_list:
+                    self.rl_uav_ids.add(uav_id)
+                print(f'[AerBus] "{controller_name}" → RL mode for UAVs: {uav_id_list}')
+
+            elif controller_name in CONTROLLER_CLASS_MAP:
+                # INLINE: one stateful instance per UAV (PID keeps prev_yaw_error, etc.)
+                for uav_id in uav_id_list:
+                    instance = CONTROLLER_CLASS_MAP[controller_name]()
+                    self.register_controller(controller_name, [uav_id],
+                                             ExecutionMode.INLINE, instance=instance)
+
+            else:
+                # EXTERNAL or PROCESS: one connection per controller type serving
+                # all its UAVs as a state bundle each step.
+                # Default to EXTERNAL (ZeroMQ); subclass or config can override to PROCESS.
+                mode = ExecutionMode.EXTERNAL
+                self.register_controller(controller_name, uav_id_list,
+                                         mode, instance=None)
+
+    # ------------------------------------------------------------------
+    # Step
+    # ------------------------------------------------------------------
+
+    def get_actions(self, plan_dict: Dict[int, List]) -> Dict[int, Tuple[float, float]]:
+        """
+        Generate control actions for all internally-controlled UAVs.
+
+        Called each step by SimulatorManager._step_uavS(). The returned dict is
+        then merged with external gym actions via map_actions_to_uavs() before
+        being dispatched to DynamicsEngine.step().
+
+        Args:
+            plan_dict: Dict[uav_id, List[Point]] from PlannerEngine.get_plans().
+                       plan_dict[uav_id][0] is the current target waypoint.
+
+        Returns:
+            Dict[uav_id, (accel_cmd, yaw_rate_cmd)] for all internally-controlled
+            UAVs. RL UAVs are intentionally omitted.
+        """
+        actions_dict: Dict[int, Tuple[float, float]] = {}
+
+        # --- INLINE controllers ---
+        for uav_id, controller in self.controller_obj_map.items():
+            if uav_id not in self.uav_dict or uav_id not in plan_dict:
+                continue
+            uav = self.uav_dict[uav_id]
+            target_pos = plan_dict[uav_id][0]   # first waypoint from planner
+            actions_dict[uav_id] = controller.get_control_action(uav, target_pos)
+
+        # --- PROCESS controllers ---
+        for controller_name, uav_id_list in self.process_uav_map.items():
+            state_bundle = {uid: self._extract_uav_state(uid)
+                            for uid in uav_id_list if uid in self.uav_dict}
+            queues = self.process_queues[controller_name]
+            queues['state'].put(state_bundle)
+            try:
+                action_bundle = queues['action'].get(timeout=0.1)
+                actions_dict.update(action_bundle)
+            except Empty:
+                print(f'[AerBus] WARNING: process controller "{controller_name}" timed out')
+
+        # --- EXTERNAL (ZeroMQ) controllers ---
+        for controller_name, socket_info in self.external_sockets.items():
+            uav_ids = socket_info.get('uav_ids', [])
+            state_bundle = {uid: self._extract_uav_state(uid)
+                            for uid in uav_ids if uid in self.uav_dict}
+            socket_info['socket'].send_json(state_bundle)
+            try:
+                action_bundle = socket_info['socket'].recv_json(flags=zmq.NOBLOCK)
+                actions_dict.update(action_bundle)
+            except zmq.Again:
+                print(f'[AerBus] WARNING: external controller "{controller_name}" '
+                      f'not responding')
+
+        # RL UAVs intentionally omitted — gym supplies via external_actions in step()
+        return actions_dict
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _extract_uav_state(self, uav_id: int) -> Dict:
+        """Serialize a UAV's state for transport to PROCESS or EXTERNAL controllers."""
+        uav = self.uav_dict[uav_id]
+        return {
+            'id':      uav_id,
+            'x':       uav.current_position.x,
+            'y':       uav.current_position.y,
+            'speed':   uav.current_speed,
+            'heading': uav.current_heading,
+            'vx':      uav.vx,
+            'vy':      uav.vy,
+        }
+
+    def _spawn_controller_process(self, controller_name: str,
+                                   controller: Optional[Controller],
+                                   uav_ids: List[int]) -> None:
+        """Spawn a subprocess for a PROCESS-mode controller."""
         state_queue = mp.Queue()
         action_queue = mp.Queue()
-        
-        # Spawn process
+
         process = mp.Process(
             target=self._controller_process_worker,
             args=(controller, state_queue, action_queue)
         )
         process.start()
-        
-        self.process_queues[controller_id] = {
-            'state': state_queue,
-            'action': action_queue
+
+        self.process_queues[controller_name] = {
+            'state':  state_queue,
+            'action': action_queue,
         }
-        self.processes[controller_id] = process
-    
+        self.processes[controller_name] = process
+
     @staticmethod
-    def _controller_process_worker(controller, state_queue, action_queue):
-        """Worker function running in separate process"""
+    def _controller_process_worker(controller, state_queue: mp.Queue,
+                                    action_queue: mp.Queue) -> None:
+        """Worker running in a separate process for PROCESS-mode controllers."""
         while True:
             try:
-                # Wait for state
-                state_dict = state_queue.get(timeout=1.0)
-                
-                if state_dict is None:  # Shutdown signal
+                state_bundle = state_queue.get(timeout=1.0)
+                if state_bundle is None:    # shutdown signal
                     break
-                
-                # Compute action
-                action = controller.compute_action(state_dict)
-                
-                # Send back action
-                action_queue.put(action)
-            
+                action_bundle = controller.get_control_action(state_bundle)
+                action_queue.put(action_bundle)
             except Empty:
                 continue
             except Exception as e:
-                print(f"Controller error: {e}")
-                action_queue.put({})  # Send empty action on error
-    
-    def _setup_external_socket(self, controller_id: str):
-        """Setup ZeroMQ socket for external controller"""
+                print(f'[AerBus worker] Error: {e}')
+                action_queue.put({})
+
+    def _setup_external_socket(self, controller_name: str) -> None:
+        """Create a ZeroMQ REP socket for an EXTERNAL-mode controller."""
         if self.zmq_context is None:
             self.zmq_context = zmq.Context()
-        
-        # Create REQ-REP socket pair
+
         socket = self.zmq_context.socket(zmq.REP)
-        port = 5555 + len(self.external_sockets)  # Incremental ports
-        socket.bind(f"tcp://*:{port}")
-        
-        self.external_sockets[controller_id] = {
+        port = 5555 + len(self.external_sockets)
+        socket.bind(f'tcp://*:{port}')
+
+        self.external_sockets[controller_name] = {
             'socket': socket,
-            'port': port
+            'port':   port,
         }
-        
-        print(f"External controller {controller_id} listening on port {port}")
-    
-    #TODO: what should be the correct return signature - once plan_dict is handed to get_actions(), it will use that plan and compare against uav current attrs to generate control actions
-    def get_actions(self, plan_dict) -> Dict[int, Any]: 
-        """
-        Main step function - distribute state, collect actions
-        
-        Returns:
-            Dict mapping UAV IDs to aggregated actions
-        """
-        
-        
-        # Collect actions from all controllers
-        all_actions = {}
-        
-        # 1. Inline controllers (fastest)
-        for controller_id, controller in self.controllers.items():
-            
-            
-            # Filter state for this controller
-            obs = 
-            
-            # Get action
-            action = controller.compute_action(obs)
-            all_actions[controller_id] = action
-        
-        # 2. Process-based controllers
-        for controller_id, queues in self.process_queues.items():
-            manifest = self.controller_manifests[controller_id]
-            obs = current_state.filter_for_controller(manifest)
-            
-            # Send state
-            queues['state'].put(obs)
-            
-            # Receive action (with timeout)
-            try:
-                action = queues['action'].get(timeout=0.1)
-                all_actions[controller_id] = action
-            except Empty:
-                print(f"Warning: Controller {controller_id} timed out")
-                all_actions[controller_id] = {}
-        
-        # 3. External controllers (via ZeroMQ)
-        for controller_id, socket_info in self.external_sockets.items():
-            manifest = self.controller_manifests[controller_id]
-            obs = current_state.filter_for_controller(manifest)
-            
-            socket = socket_info['socket']
-            
-            # Send state as JSON
-            socket.send_json(obs)
-            
-            # Receive action
-            try:
-                action = socket.recv_json(flags=zmq.NOBLOCK)
-                all_actions[controller_id] = action
-            except zmq.Again:
-                print(f"Warning: External controller {controller_id} not responding")
-                all_actions[controller_id] = {}
-        
-        # 4. Merge actions (handle overlapping control)
-        merged_actions = self.action_merger.merge(all_actions, 
-                                                   self.controller_manifests)
-        
-        return merged_actions
-    
-    def reset(self):
-        """Reset all controllers (important for RL episodes)"""
-        for controller in self.controllers.values():
-            controller.reset()
-        
-        # Send reset signal to process-based controllers
-        for controller_id, queues in self.process_queues.items():
+        print(f'[AerBus] External controller "{controller_name}" '
+              f'listening on port {port}')
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    def reset(self) -> None:
+        """Reset all controllers (important for RL episode boundaries)."""
+        for controller in self.controller_obj_map.values():
+            if hasattr(controller, 'reset'):
+                controller.reset()
+
+        for queues in self.process_queues.values():
             queues['state'].put({'reset': True})
-        
-        # Send reset to external controllers
-        for controller_id, socket_info in self.external_sockets.items():
-            socket = socket_info['socket']
-            socket.send_json({'reset': True})
-            socket.recv_json()  # Wait for ACK
-    
-    def shutdown(self):
-        """Clean shutdown of all resources"""
-        # Terminate processes
+
+        for socket_info in self.external_sockets.values():
+            socket_info['socket'].send_json({'reset': True})
+            socket_info['socket'].recv_json()   # wait for ACK
+
+    def shutdown(self) -> None:
+        """Clean shutdown of all subprocess and ZeroMQ resources."""
         for process in self.processes.values():
             process.terminate()
             process.join(timeout=1.0)
-        
-        # Close ZeroMQ sockets
+
         for socket_info in self.external_sockets.values():
             socket_info['socket'].close()
-        
+
         if self.zmq_context:
             self.zmq_context.term()
 
 
-#* ActionMerger -
-# For future version of UrbanNav 
-# Feature of ActionMerger will resolve conflict when multiple controllers are sending action to same UAV 
-# There will be a priority list 
-# and based on that we will select the action for the UAV  
+# ---------------------------------------------------------------------------
+# ActionMerger (future)
+# ---------------------------------------------------------------------------
+# When multiple controllers claim the same UAV (e.g. a safety override layer
+# on top of a learned policy), ActionMerger will resolve conflicts using a
+# priority list before the action dict is dispatched to DynamicsEngine.
+# Not implemented yet — SimulatorManager.map_actions_to_uavs() handles the
+# simpler case of merging internal vs. gym-supplied actions today.

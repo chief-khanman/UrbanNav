@@ -17,3 +17,8 @@ class Controller(ABC):
     def set_control_action(self):
         pass
 
+    @abstractmethod
+    def reset(self) -> None:
+        """Reset controller state between episodes. Override in stateful subclasses."""
+        pass
+

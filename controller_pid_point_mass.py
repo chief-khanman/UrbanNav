@@ -33,3 +33,6 @@ class PIDPointMassController(Controller):
     
     def set_control_action(self,):
         pass
+
+    def reset(self,):
+        pass
