@@ -23,7 +23,7 @@ RESERVED_TYPE_LEARNING = 'LEARNING'
 # Valid string identifiers for each component type.
 # Dynamics, controller, sensor classes are wired separately once those modules are ready.
 VALID_DYNAMICS: set[str] = {'PointMass', 'SixDOF', 'TwoDVector', 'ORCA'}
-VALID_CONTROLLERS: set[str] = {'PIDPointMass', 'LQR', 'MARL', 'ORCA', 'Static', 'RL'}
+VALID_CONTROLLERS: set[str] = {'PIDPointMassController', 'LQR', 'MARL', 'ORCA', 'Static', 'RL'}
 VALID_SENSORS: set[str] = {'PartialSensor', 'GlobalSensor', 'MapSensor'}
 VALID_PLANNERS: set[str] = {'PointMass-PID', 'PointMass-RL', 'SixDOF-PID', 'SixDOF-LQR', 'N/A'}
 
