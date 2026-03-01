@@ -275,7 +275,10 @@ class SimulatorManager:
         collision_dict_uavS = self.sensor_module.get_collision_uavS()
 
         ### REMOVE UAV ###
-        # remove UAVs that have collided 
+        # remove UAVs that have collided
+        #! check - once UAVs are removed from atc.uav_list, are they also removed from all there references
+        #! places to check - sensor, planner, controller, dynamics - i know all these components are using references to the list but just make sure 
+        #! check vertiports   
         self.atc.remove_uavs_by_id(collision_dict_restricted_area)
         self.atc.remove_uavs_by_id(collision_dict_uavS)
         # record their stats/metrics 
