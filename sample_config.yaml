@@ -27,27 +27,19 @@ airspace:
 # LEARNING is the only reserved type_name - strictly for UAV using RL controller during training phase
 fleet_composition:
   - type_name: STANDARD
-    count: 6 # ATC handles id and type_name for dynamics, controller, and state update
+    count: 2 # ATC handles id and type_name for dynamics, controller, and state update
     dynamics: PointMass
-    controller: PID
+    controller: PIDPointMassController
     sensor: PartialSensor # OR GlobalSensor
-
+    planner: PointMass-PID 
+ 
   - type_name: HEAVY
-    count: 6
-    dynamics: SixDOF
-    controller: MARL
-    sensor: GlobalSensor
-
-  - type_name: LEARNING
-    count: 1 
+    count: 3 # ATC handles id and type_name for dynamics, controller, and state update
     dynamics: PointMass
-    controller: null  # null is valid for LEARNING type during training phase
-    sensor: GlobalSensor
+    controller: PIDPointMassController
+    sensor: PartialSensor # OR GlobalSensor
+    planner: PointMass-PID 
+   
 
-  - type_name: ORCA       # must match a key in VALID_UAVS / UAV_TYPE_REGISTRY in component_schema.py
-    count: 3
-    dynamics: ORCA
-    controller: ORCA
-    sensor: GlobalSensor
 
 #### CONFIG ####

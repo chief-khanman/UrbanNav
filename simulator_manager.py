@@ -1,13 +1,9 @@
 import datetime
 import random
-from shapely import Point
 from typing import Dict, List, Tuple, Any
 from airspace import Airspace
-from vertiport import Vertiport
 from atc import ATC
-from uav import UAV
 from component_schema import UAMConfig
-from collision_detection import AdaptiveCollisionDetector
 from sensor_engine import SensorEngine
 from planner_engine import PlannerEngine
 from aer_bus import AerBus
