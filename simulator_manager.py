@@ -283,8 +283,17 @@ class SimulatorManager:
         
         #TODO:  
         # collate all the collided uav ids into one list from the dicts
-        # collision_ra_list = collate_dict_list(collision_dict_restricted_area)
-        # collision_uavS_list = collate_dict_list(collision_dict_uavS) 
+        # structure and operation of function
+        # define a new internal function -
+        # def _merge_collision_dict(*collision_dicts):
+        #         format of each dict is uav_id -> list[uav_id]
+        #         remove_uav_id = []
+        #         for collision_dict in collision_dicts:
+        #           for collision_list in collision_dict.values():
+        #             remove_uav_id += collision_list
+        #     return list(set(remove_uav_id)) # this is to remove duplicates, although there shouldn't be any 
+        #              
+        # Instead of using two calls to remove by id, we use one call 
         
         self.atc.remove_uavs_by_id(collision_dict_restricted_area) #TODO: replace with collision_ra_list
         self.atc.remove_uavs_by_id(collision_dict_uavS) #TODO: replace with collision_uavS_list
