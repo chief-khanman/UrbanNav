@@ -89,4 +89,19 @@ class PartialSensor(Sensor):
 #                     for i in range(start, end):
 #                         query_ids.append(self.cell_entries[i])
                         
-#         return query_ids
+#         return query_ids 
+
+#    def check_nmac(query_ids):
+#       nmac_ids = []
+#       for query_id in query_ids:
+#           if uav.distance(self.uav_dict[query_id]) <= nmac_distance:
+#               nmac_ids.append(query_id)
+#       return nmac_ids
+# 
+#     def check_collision(nmac_ids):
+#       collision_ids = []
+#       for nmac_id in nmac_ids:
+#           if uav.distance(self.uav_dict[nmac_id]) <= collision_distance:
+#               collision_ids.append(nmac_id)
+# 
+#       return collision_ids 
