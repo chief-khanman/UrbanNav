@@ -6,7 +6,7 @@ from component_schema import UAMConfig, VALID_DYNAMICS
 from dynamics_template import Dynamics
 from dynamics_point_mass import PointMass
 from dynamics_six_dof import SixDOF
-from dynamics_two_d_vector import TwoDVector
+from dynamics_holonomic import HolonomicDynamics
 # in the config file -
 # dynamics mode and solver will be defined for use with DynamicsEngine()
 
@@ -17,7 +17,7 @@ from dynamics_two_d_vector import TwoDVector
 DYNAMICS_CLASS_MAP: Dict[str, type] = {
     'PointMass':    PointMass,
     'SixDOF':       SixDOF,
-    'TwoDVector':   TwoDVector,
+    'TwoDVector-Holonomic': HolonomicDynamics,
     # 'ORCA': ORCA,  # TODO: add once dynamics_ORCA.py is implemented
 }
 

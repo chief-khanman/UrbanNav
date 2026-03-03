@@ -22,10 +22,10 @@ RESERVED_TYPE_LEARNING = 'LEARNING'
 
 # Valid string identifiers for each component type.
 # Dynamics, controller, sensor classes are wired separately once those modules are ready.
-VALID_DYNAMICS: set[str] = {'PointMass', 'SixDOF', 'TwoDVector', 'ORCA'}
-VALID_CONTROLLERS: set[str] = {'PIDPointMassController', 'LQR', 'MARL', 'ORCA', 'Static', 'RL'}
+VALID_DYNAMICS: set[str] = {'PointMass', 'SixDOF', 'TwoDVector-Holonomic', 'ORCA'}
+VALID_CONTROLLERS: set[str] = {'PIDPointMassController', 'PIDHolonomicController', 'LQR', 'MARL', 'ORCA', 'Static', 'RL'}
 VALID_SENSORS: set[str] = {'PartialSensor', 'GlobalSensor', 'MapSensor'}
-VALID_PLANNERS: set[str] = {'PointMass-PID', 'PointMass-RL', 'SixDOF-PID', 'SixDOF-LQR', 'N/A'}
+VALID_PLANNERS: set[str] = {'PointMass-PID', 'Holonomic-PID', 'PointMass-RL', 'SixDOF-PID', 'SixDOF-LQR', 'N/A'}
 
 # UAV type registry — physical parameters live here in code, not in the yaml.
 # fleet_composition.type_name values must match a key in this dict.

@@ -6,6 +6,7 @@ from uav_template import UAV_template
 from uav import UAV
 from component_schema import UAMConfig, VALID_PLANNERS
 from plan_point_mass_pid import PointMassPIDPlanner
+from plan_holonomic import HolonomicPlanner
 
 
 # Maps VALID_PLANNERS string names → PlannerTemplate subclasses.
@@ -14,6 +15,7 @@ from plan_point_mass_pid import PointMassPIDPlanner
 # implement the class, import it above, and add its entry to this map.
 PLANNER_CLASS_MAP: Dict[str, type] = {
     'PointMass-PID': PointMassPIDPlanner,
+    'Holonomic-PID': HolonomicPlanner,
     # 'PointMass-RL': PointMassRLPlanner,   # TODO: add once implemented
     # 'SixDOF-PID':   SixDOFPIDPlanner,     # TODO: add once implemented
 }
