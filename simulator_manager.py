@@ -247,6 +247,36 @@ class SimulatorManager:
 
         return {**internal_plans_dict, **updated_external_plans_dict} # since internal is already unpacked, the control actions from external should be a single dict that will be unpacked in return 
     
+    def _merge_collision_dicts(
+        self,
+        collision_dict_uavS: Dict[int, List[int]],
+        collision_dict_ra: Dict[int, List[int]]
+    ) -> List[int]:
+        """
+        Extract all UAV IDs to remove from both collision dicts.
+
+        collision_dict_uavS: { uav_id -> [colliding_uav_id, ...] }
+            Detection is symmetric — every colliding UAV appears as a value
+            in its partner's entry, so iterating values captures all IDs.
+
+        collision_dict_ra: { uav_id -> [ra_id, ...] }
+            Values are restricted area IDs (not UAV IDs). Only keys where
+            the value list is non-empty are UAV IDs to remove.
+        """
+        remove_uav_ids: set = set()
+
+        # UAV-UAV: values are UAV IDs (symmetric detection covers all involved UAVs)
+        for colliding_uavs in collision_dict_uavS.values():
+            if colliding_uavs:
+                remove_uav_ids.update(colliding_uavs)
+
+        # Restricted area: values are RA IDs — use keys only
+        for uav_id, ra_ids in collision_dict_ra.items():
+            if ra_ids:
+                remove_uav_ids.add(uav_id)
+
+        return list(remove_uav_ids)
+
     def _step_uavS(self, external_action_dict: UAVCommandBundle) -> Tuple[Dict,Dict,Dict,Dict,Dict]:
         '''Bring all sort of updates and execute them in this function '''
         
@@ -266,9 +296,6 @@ class SimulatorManager:
         self.dynamics_module.step(actions_dict=updated_control_actions_dict)
 
         ### CHECK COLLISION ###
-        #TODO: update collision module to return UAV_id list 
-        #TODO: when there is a collision - update - 1. atc.uav_dict, atc.dynamics_map, sensor_map, planner_map, controller_map
-        # the uav_list needs to be updated here 
         detection_dict_restricted_area = self.sensor_module.get_detection_restricted_area() # <- pass uav_id_list
         detection_dict_uavS = self.sensor_module.get_detection_other_uavS()
         nmac_dict = self.sensor_module.get_nmac()
@@ -277,26 +304,9 @@ class SimulatorManager:
 
         ### REMOVE UAV ###
         # remove UAVs that have collided
-        #! check - once UAVs are removed from atc.uav_list, are they also removed from all there references
-        #! places to check - sensor, planner, controller, dynamics - i know all these components are using references to the list but just make sure 
         #! check vertiports 
-        
-        #TODO:  
-        # collate all the collided uav ids into one list from the dicts
-        # structure and operation of function
-        # define a new internal function -
-        # def _merge_collision_dict(*collision_dicts):
-        #         format of each dict is uav_id -> list[uav_id]
-        #         remove_uav_id = []
-        #         for collision_dict in collision_dicts:
-        #           for collision_list in collision_dict.values():
-        #             remove_uav_id += collision_list
-        #     return list(set(remove_uav_id)) # this is to remove duplicates, although there shouldn't be any 
-        #              
-        # Instead of using two calls to remove by id, we use one call 
-        
-        self.atc.remove_uavs_by_id(collision_dict_restricted_area) #TODO: replace with collision_ra_list
-        self.atc.remove_uavs_by_id(collision_dict_uavS) #TODO: replace with collision_uavS_list
+        uavs_to_remove = self._merge_collision_dicts(collision_dict_uavS, collision_dict_restricted_area)
+        self.atc.remove_uavs_by_id(uavs_to_remove)
         # record their stats/metrics 
         
         return detection_dict_restricted_area, detection_dict_uavS, nmac_dict, collision_dict_restricted_area, collision_dict_uavS
