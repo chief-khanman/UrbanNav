@@ -67,7 +67,8 @@ class SimulatorManager:
         
         ### sensor ###
         # collision_detector for COLLISION DETECTION/RESOLUTION
-        self.sensor_module = SensorEngine(self.config, self.atc.sensor_map, self.atc.uav_dict)
+        self.sensor_module = SensorEngine(self.config, self.atc.sensor_map, self.atc.uav_dict,
+                                          airspace=self.airspace)
         
         # use config to send data to statemanager 
         ### Planner ###
@@ -120,10 +121,10 @@ class SimulatorManager:
         
         self.currentstep = 0
         
-        # dyn_engine, aer_bus, path_planner
-        self._initiate_simulator_components()
-        # airspace, atc, 
+        # airspace, atc
         self._initiate_simulator_assets()
+        # dyn_engine, aer_bus, path_planner, sensor
+        self._initiate_simulator_components()
         # uav  
         self._build_assets()
         # atc state, airspace state, ...
@@ -278,9 +279,15 @@ class SimulatorManager:
         # remove UAVs that have collided
         #! check - once UAVs are removed from atc.uav_list, are they also removed from all there references
         #! places to check - sensor, planner, controller, dynamics - i know all these components are using references to the list but just make sure 
-        #! check vertiports   
-        self.atc.remove_uavs_by_id(collision_dict_restricted_area)
-        self.atc.remove_uavs_by_id(collision_dict_uavS)
+        #! check vertiports 
+        
+        #TODO:  
+        # collate all the collided uav ids into one list from the dicts
+        # collision_ra_list = collate_dict_list(collision_dict_restricted_area)
+        # collision_uavS_list = collate_dict_list(collision_dict_uavS) 
+        
+        self.atc.remove_uavs_by_id(collision_dict_restricted_area) #TODO: replace with collision_ra_list
+        self.atc.remove_uavs_by_id(collision_dict_uavS) #TODO: replace with collision_uavS_list
         # record their stats/metrics 
         
         return detection_dict_restricted_area, detection_dict_uavS, nmac_dict, collision_dict_restricted_area, collision_dict_uavS

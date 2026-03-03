@@ -1,107 +1,185 @@
+from typing import Dict, List, Optional
 from sensor_template import Sensor
-
-
+from sensor_spatial_hash import SpatialHash, _euclidean_3d
+from uav import UAV
 
 class PartialSensor(Sensor):
+    """Partial (range-limited) sensor using a spatial hash for broad-phase lookup.
 
-    def __init__(self,):
+    Each UAV using this sensor type can only detect other UAVs within its own
+    detection_radius.  The spatial hash provides fast broad-phase candidate
+    retrieval; a 3D distance check is then applied for exact narrow-phase filtering.
+
+    Detection chain (each level is a strict subset of the previous):
+        broad phase  -> candidates from spatial hash query
+        detection    -> distance <= uav.detection_radius
+        NMAC         -> distance <= uav.nmac_radius
+        collision    -> distance <= (uav.radius + other.radius)
+
+    One PartialSensor instance is shared by all UAVs of this sensor type
+    (mirrors the DynamicsEngine pattern).  Per-UAV state is not stored here —
+    it lives on the UAV UAV itself.
+
+    Lifecycle per simulation step:
+        1. SensorEngine calls update(uav_dict) once — rebuilds the spatial hash.
+        2. SensorEngine calls get_uav_detection / get_nmac / get_uav_collision
+           per UAV in turn, reusing the already-built hash.
+
+    The commented-out SpatialHash and check_nmac/check_collision drafts that
+    previously lived in this file have been moved to sensor_spatial_hash.py
+    (SpatialHash class) and implemented below as get_nmac / get_uav_collision.
+    Both sensor_partial.py and the future sensor_global.py import from that
+    shared utility module.
+    """
+
+    def __init__(self, spacing: float , max_uavs: int = 200) -> None:
+        """
+        Args:
+            spacing: Grid cell size in metres.  Should be >= the largest
+                     detection_radius in the fleet so each query covers at
+                     most a 3x3x3 block of cells.  If None, computed lazily
+                     on the first update() call as max(detection_radius).
+            max_uavs: Pre-allocated capacity for internal arrays.
+        """
         super().__init__()
+        self._spacing: float = spacing
+        self._max_uavs: int = max_uavs
+        self._spatial_hash: SpatialHash = SpatialHash(spacing, max_uavs)
+        self._uav_dict: Dict[int, UAV] = {}
 
+    # ------------------------------------------------------------------
+    # Per-step rebuild (called by SensorEngine before any get_* queries)
+    # ------------------------------------------------------------------
 
+    def update(self, uav_dict: Dict[int, UAV]) -> None:
+        """Store the live fleet reference and rebuild the spatial hash.
 
-#### ---- SPATIAL HASHING ---- ####
-# import math
-# import numpy as np
+        Must be called once per simulation step by SensorEngine before any
+        get_uav_detection / get_nmac / get_uav_collision calls.
 
-# class SpatialHash:
-#     def __init__(self, spacing, max_uavs):
-#         self.spacing = spacing
-#         # Table size chosen to be 2x the number of particles for fewer collisions [4]
-#         self.table_size = 2 * max_uavs 
-        
-#         # cell_start includes the +1 guard to prevent out-of-bounds in the query [3]
-#         self.cell_start = np.zeros(self.table_size + 1, dtype=int)
-#         # cell_entries is the dense array [3, 4]
-#         self.cell_entries = np.zeros(max_uavs, dtype=int)
+        Stores a reference (no copy) — position updates from dynamics are
+        visible immediately since dynamics runs before sensors each step.
 
-#     def int_coords(self, x, y, z):
-#         # Floors coordinates to map physical space into grid indices [2, 6]
-#         return math.floor(x / self.spacing), math.floor(y / self.spacing), math.floor(z / self.spacing)
+        Args:
+            uav_dict: Mapping uav_id (int) -> UAV instance from ATC.
+        """
+        self._uav_dict = uav_dict
 
-#     def hash_function(self, xi, yi, zi):
-#         # Evenly distributes cells using bitwise XOR, mapping to an index [5, 7]
-#         h = (xi * 92837111) ^ (yi * 689287499) ^ (zi * 283923481)
-#         return abs(h) % self.table_size
+        if not uav_dict:
+            return
 
-#     def run_broad_phase_search(self, uav_dict):
-#         """Builds the spatial hash data structure from the current UAV positions"""
-#         # 1. Reset arrays to 0 [4, 8]
-#         self.cell_start.fill(0)
-#         self.cell_entries.fill(0)
+        # Lazily compute spacing from the fleet's largest detection radius
+        if not self._spacing:
+            self._spacing = max(uav.detection_radius for uav in uav_dict.values())
 
-#         # 2. Count UAVs per cell [4, 8]
-#         for uav_id, uav in uav_dict.items():
-#             xi, yi, zi = self.int_coords(uav.px, uav.py, uav.pz)
-#             hash_id = self.hash_function(xi, yi, zi)
-#             self.cell_start[hash_id] += 1
+        # Re-allocate if fleet has grown beyond initial max_uavs
+        current_count = len(uav_dict)
+        if self._spatial_hash is None or current_count > self._max_uavs:
+            self._max_uavs = max(current_count, self._max_uavs)
+            self._spatial_hash = SpatialHash(self._spacing, self._max_uavs)
 
-#         # 3. Compute partial sums (End boundaries) [1, 8]
-#         # Each number will point to the last cell entry + 1
-#         total_sum = 0
-#         for i in range(self.table_size):
-#             count = self.cell_start[i]
-#             total_sum += count
-#             self.cell_start[i] = total_sum
-#         # Apply the final total sum to the "+1" guard index
-#         self.cell_start[self.table_size] = total_sum 
+        self._spatial_hash.build(uav_dict)
 
-#         # 4. Fill the dense array and mutate cell_start [8, 9]
-#         for uav_id, uav in uav_dict.items():
-#             xi, yi, zi = self.int_coords(uav.px, uav.py, uav.pz)
-#             hash_id = self.hash_function(xi, yi, zi)
-            
-#             # Decrease the pointer and place the ID [8, 9]
-#             self.cell_start[hash_id] -= 1 
-#             particle_placement_id = self.cell_start[hash_id]
-#             self.cell_entries[particle_placement_id] = uav_id
+    # ------------------------------------------------------------------
+    # Abstract method implementations
+    # ------------------------------------------------------------------
 
-#     def query(self, pos, max_dist):
-#         """Returns all UAV IDs in the cells surrounding the queried position"""
-#         px, py, pz = pos
-#         query_ids = []
-        
-#         # Calculate the bounding box of cells to search [1]
-#         # If max_dist <= spacing, this naturally results in a 3x3x3 (27 cell) block [2, 6]
-#         min_xi, min_yi, min_zi = self.int_coords(px - max_dist, py - max_dist, pz - max_dist)
-#         max_xi, max_yi, max_zi = self.int_coords(px + max_dist, py + max_dist, pz + max_dist)
+    def get_uav_detection(self, uav_id: int, *args) -> List[int]:
+        """Return IDs of UAVs within this UAV's detection_radius.
 
-#         # Loop through the block of cells [1]
-#         for xi in range(min_xi, max_xi + 1):
-#             for yi in range(min_yi, max_yi + 1):
-#                 for zi in range(min_zi, max_zi + 1):
-#                     hash_id = self.hash_function(xi, yi, zi)
-                    
-#                     # Because cell_start was mutated, it now points to the first entry
-#                     # The next index acts as the end boundary [1, 3]
-#                     start = self.cell_start[hash_id]
-#                     end = self.cell_start[hash_id + 1]
-                    
-#                     for i in range(start, end):
-#                         query_ids.append(self.cell_entries[i])
-                        
-#         return query_ids 
+        Broad phase: spatial hash query with detection_radius bounding box.
+        Narrow phase: exact 3D distance check, exclude self.
 
-#    def check_nmac(query_ids):
-#       nmac_ids = []
-#       for query_id in query_ids:
-#           if uav.distance(self.uav_dict[query_id]) <= nmac_distance:
-#               nmac_ids.append(query_id)
-#       return nmac_ids
-# 
-#     def check_collision(nmac_ids):
-#       collision_ids = []
-#       for nmac_id in nmac_ids:
-#           if uav.distance(self.uav_dict[nmac_id]) <= collision_distance:
-#               collision_ids.append(nmac_id)
-# 
-#       return collision_ids 
+        Args:
+            uav_id: ID of the querying UAV.
+
+        Returns:
+            List of detected UAV IDs (excludes uav_id itself).
+        """
+        uav = self._uav_dict[uav_id]
+        candidates = self._spatial_hash.query(
+            (uav.px, uav.py, uav.pz), uav.detection_radius
+        )
+
+        detected: List[int] = []
+        for candidate_id in candidates:
+            if candidate_id == uav_id:
+                continue
+            other = self._uav_dict.get(candidate_id)
+            if other is None:
+                continue
+            dist = _euclidean_3d(uav.px, uav.py, uav.pz,
+                                  other.px, other.py, other.pz)
+            if dist <= uav.detection_radius:
+                detected.append(candidate_id)
+        return detected
+
+    def get_nmac(self, uav_id: int) -> List[int]:
+        """Return IDs of UAVs within this UAV's nmac_radius.
+
+        Chains from get_uav_detection — only detected UAVs are checked,
+        since an NMAC cannot occur with a UAV that was not detected.
+
+        Args:
+            uav_id: ID of the querying UAV.
+
+        Returns:
+            List of UAV IDs in NMAC range (subset of detected).
+        """
+        uav = self._uav_dict[uav_id]
+        detected_ids = self.get_uav_detection(uav_id)
+
+        nmac: List[int] = []
+        for other_id in detected_ids:
+            other = self._uav_dict[other_id]
+            dist = _euclidean_3d(uav.px, uav.py, uav.pz,
+                                  other.px, other.py, other.pz)
+            if dist <= uav.nmac_radius:
+                nmac.append(other_id)
+        return nmac
+
+    def get_uav_collision(self, uav_id: int) -> List[int]:
+        """Return IDs of UAVs physically colliding with this UAV.
+
+        Collision threshold is the sum of both UAVs' body radii — correct
+        two-body overlap condition.  Chains from get_nmac.
+
+        Args:
+            uav_id: ID of the querying UAV.
+
+        Returns:
+            List of colliding UAV IDs (subset of NMAC).
+        """
+        uav = self._uav_dict[uav_id]
+        nmac_ids = self.get_nmac(uav_id)
+
+        collisions: List[int] = []
+        for other_id in nmac_ids:
+            other = self._uav_dict[other_id]
+            dist = _euclidean_3d(uav.px, uav.py, uav.pz,
+                                  other.px, other.py, other.pz)
+            if dist <= (uav.radius + other.radius):
+                collisions.append(other_id)
+        return collisions
+
+    # ------------------------------------------------------------------
+    # Restricted airspace (stubs — populated when RA geometry is wired)
+    # ------------------------------------------------------------------
+
+    def get_ra_detection(self, uav_id: int) -> List[int]:
+        """Return IDs of restricted areas within detection range.
+        Returns [] until set_restricted_area_data() has been called.
+        """
+        if self._ra_geo_series is None:
+            return []
+        # TODO: implement shapely intersection check against ra_geo_series
+        return []
+
+    def get_ra_collision(self, uav_id: int) -> List[int]:
+        """Return IDs of restricted areas the UAV's body overlaps.
+        Returns [] until set_restricted_area_data() has been called.
+        """
+        if self._ra_geo_series is None:
+            return []
+        # TODO: implement shapely intersection check against ra_geo_series
+        return []
