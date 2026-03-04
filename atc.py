@@ -123,7 +123,7 @@ class ATC():
         Returns:
             None
         """
-        print(f'Current UAV list: {self.uav_dict.values()}')
+        # print(f'Current UAV list: {self.uav_dict.values()}')
 
         if not ids_to_remove:
             return None
@@ -140,8 +140,8 @@ class ATC():
                 if uav_id in vp.takeoff_queue:
                     vp.takeoff_queue.remove(uav_id)
 
-        time.sleep(1)
-        print(f'Updated UAV list: {self.uav_dict.values()}')
+        # time.sleep(1)
+        # print(f'Updated UAV list: {self.uav_dict.values()}')
         
         return None
     
