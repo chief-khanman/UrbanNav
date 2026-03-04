@@ -32,7 +32,7 @@ class PartialSensor(Sensor):
     shared utility module.
     """
 
-    def __init__(self, spacing: float , max_uavs: int = 200) -> None:
+    def __init__(self, spacing: float = None, max_uavs: int = 200) -> None:
         """
         Args:
             spacing: Grid cell size in metres.  Should be >= the largest
@@ -44,7 +44,7 @@ class PartialSensor(Sensor):
         super().__init__()
         self._spacing: float = spacing
         self._max_uavs: int = max_uavs
-        self._spatial_hash: SpatialHash = SpatialHash(spacing, max_uavs)
+        self._spatial_hash: Optional[SpatialHash] = SpatialHash(spacing, max_uavs) if spacing is not None else None
         self._uav_dict: Dict[int, UAV] = {}
 
     # ------------------------------------------------------------------

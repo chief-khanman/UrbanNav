@@ -10,6 +10,8 @@ class PointMass(Dynamics):
     def __init__(self,):
         super().__init__()
 
+    def update(self, _uav_id: str, _action) -> None:
+        pass
 
     def step(self, action, uav: UAV|UAV_template) -> None:
         #! make sure heading_change is in radians

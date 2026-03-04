@@ -90,8 +90,10 @@ class SimulatorManager:
     def _build_assets(self,):
         #### ----------- VP ----------- ####
         # create vertiports
-        num_vp = self.config.airspace.number_of_vertiports * self.config.vertiport.number_of_landing_pad
-        # change this method to build vertiports in different ways 
+        # number_of_vertiports is the total VP count — landing_takeoff_capacity
+        # is a per-Vertiport property, not a multiplier for the total VP count.
+        num_vp = self.config.airspace.number_of_vertiports
+        # change this method to build vertiports in different ways
         self.airspace.add_n_random_vps_to_vplist(num_vertiports=num_vp)
         
         ## ----> VP_LIST <---- ##

@@ -31,7 +31,7 @@ class UAMSimulator:
         # collect and store 
         # 1. step metrics 
         # 2. episode metrics 
-        self.logger = Logger() # need to define a path to metrics directory - get from config file  
+        self.logger = Logger(self.config.logging)
     
     
     def reset(self):

@@ -263,5 +263,7 @@ dependencies:
   - zipp=3.17.0=py311h06a4308_0
   - zlib=1.2.13=h5eee18b_1
   - zstd=1.5.5=hc292b87_2
+  - pyyaml
+  - pydantic>=2.0
   - pip:
     - pettingzoo==1.24.3

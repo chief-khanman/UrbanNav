@@ -174,14 +174,14 @@ class UAV_template(ABC):
         # UAV global vector state - for rendering position of UAV 
         self.px:float = self.current_position.x
         self.py:float = self.current_position.y
-        self.pz:float = self.current_position.z         
+        self.pz:float = self.current_position.z if self.current_position.has_z else 0.0
 
-        # NED is simply the modified current location 
+        # NED is simply the modified current location
         # modified_current_location = current location - map_centeroid
-        # NED frame helps simplify the calculations - thats all 
+        # NED frame helps simplify the calculations - thats all
         self.n:float = self.current_position.x # subtract airspace mid-point coord
-        self.e:float = self.current_position.y 
-        self.d:float = self.current_position.z 
+        self.e:float = self.current_position.y
+        self.d:float = self.current_position.z if self.current_position.has_z else 0.0
 
         self.vx:float = 0.0
         self.vy:float = 0.0

@@ -49,6 +49,12 @@ class UAMSimulatorConfig(BaseModel):
     seed: int
 
 
+class LoggingConfig(BaseModel):
+    """Controls whether episode metrics are collected and where they are saved."""
+    enabled: bool = True
+    log_dir: str = 'logs'
+
+
 class VertiportConfig(BaseModel):
     number_of_landing_pad: int
 
@@ -191,6 +197,7 @@ class UAMConfig(BaseModel):
     vertiport: VertiportConfig
     airspace: AirspaceConfig
     fleet_composition: List[UAVFleetInstanceConfig]
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
 
     @classmethod
     def load_from_yaml(cls, path: str) -> 'UAMConfig':

@@ -124,10 +124,13 @@ class ATC():
             None
         """
         print(f'Current UAV list: {self.uav_dict.values()}')
-        
+
+        if not ids_to_remove:
+            return None
+
         for uav_id in ids_to_remove:
-            print('Removed UAV: ')
-            self.uav_dict.pop(uav_id) 
+            print('Removed UAV:', uav_id)
+            self.uav_dict.pop(uav_id, None)
         
         time.sleep(1)
         print(f'Updated UAV list: {self.uav_dict.values()}')
@@ -243,7 +246,8 @@ class ATC():
         """
         
         outgoing_uav = self.uav_dict[outgoing_uav_id]
-        outgoing_uav.start_vertiport.uav_id_list.remove(outgoing_uav_id)
+        if outgoing_uav_id in outgoing_uav.start_vertiport.uav_id_list:
+            outgoing_uav.start_vertiport.uav_id_list.remove(outgoing_uav_id)
 
         return None
     
@@ -271,7 +275,7 @@ class ATC():
                 self.holding_pattern_at_vertiport(uav_id)   
             else: 
             #   _landing_procedure(self, landing_uav_id)
-                if uav in uav.end_vertiport.landing_queue:
+                if uav_id in uav.end_vertiport.landing_queue:
                     uav.end_vertiport.landing_queue.remove(uav_id)
                 self._landing_procedure(uav_id)
 
