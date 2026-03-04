@@ -39,3 +39,7 @@ class PointMass(Dynamics):
         uav.vy = uav.current_speed * math.sin(uav.current_heading)
         # uav.vz -> unchanged
         uav.current_position = Point(uav.current_position.x + uav.vx * self.dt, uav.current_position.y + uav.vy * self.dt)
+        # keep sensor position attributes in sync with current_position
+        uav.px = uav.current_position.x
+        uav.py = uav.current_position.y
+        # pz unchanged — 2D model

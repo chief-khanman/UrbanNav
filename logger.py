@@ -5,7 +5,7 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from component_schema import LoggingConfig, SimulatorState
+from component_schema import LoggingConfig, SimulatorState, UAMConfig
 from metrics_collector import MetricsCollector, _serialize
 
 
@@ -45,7 +45,8 @@ class Logger:
         episode_id:  Auto-incrementing integer episode counter.
     """
 
-    def __init__(self, config: Optional[LoggingConfig] = None) -> None:
+    def __init__(self, config: Optional[LoggingConfig] = None,
+                 full_config: Optional[UAMConfig] = None) -> None:
         cfg = config or LoggingConfig()
         self.enabled: bool = cfg.enabled
         self.log_dir: str = cfg.log_dir
@@ -56,6 +57,9 @@ class Logger:
         self._metrics_collector = MetricsCollector()
         self.episode_id: int = 0
         self._episode_dir: str = ''
+        self._config_snapshot: Dict[str, Any] = (
+            full_config.model_dump() if full_config is not None else {}
+        )
 
         self._init_episode_dir()
 
@@ -185,6 +189,7 @@ class Logger:
         # metadata.json
         metadata = self.get_simulator_start_metrics()
         metadata['episode_dir'] = self._episode_dir
+        metadata['config'] = _serialize(self._config_snapshot)
         self._write_json(os.path.join(self._episode_dir, 'metadata.json'), metadata)
 
         # step_history.json

@@ -31,7 +31,7 @@ class UAMSimulator:
         # collect and store 
         # 1. step metrics 
         # 2. episode metrics 
-        self.logger = Logger(self.config.logging)
+        self.logger = Logger(self.config.logging, full_config=self.config)
     
     
     def reset(self):
@@ -48,8 +48,8 @@ class UAMSimulator:
 
         current_state = self.simulator_manager.get_state()
 
-        self.simulator_manager.step(commands)
-        self.logger.log_step(current_state)
+        collisions = self.simulator_manager.step(commands)
+        self.logger.log_step(current_state, collisions=collisions)
 
         return None
     

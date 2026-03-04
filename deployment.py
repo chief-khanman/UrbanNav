@@ -20,7 +20,7 @@ def main() -> None:
     for step in range(sim.total_timestep):
         sim.step({})   # empty command bundle — all UAVs use internal controllers
 
-        if step % 10 == 0:
+        if step % 100 == 0:
             num_uavs = len(sim.simulator_manager.atc.uav_dict)
             print(f'  step {step:4d}/{sim.total_timestep} | active UAVs: {num_uavs}')
 

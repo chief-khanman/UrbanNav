@@ -131,7 +131,15 @@ class ATC():
         for uav_id in ids_to_remove:
             print('Removed UAV:', uav_id)
             self.uav_dict.pop(uav_id, None)
-        
+            # Evict from all vertiport lists so step loops don't KeyError next step
+            for vp in self.airspace.vertiport_list:
+                if uav_id in vp.uav_id_list:
+                    vp.uav_id_list.remove(uav_id)
+                if uav_id in vp.landing_queue:
+                    vp.landing_queue.remove(uav_id)
+                if uav_id in vp.takeoff_queue:
+                    vp.takeoff_queue.remove(uav_id)
+
         time.sleep(1)
         print(f'Updated UAV list: {self.uav_dict.values()}')
         
@@ -265,28 +273,34 @@ class ATC():
             None
         """
         uav = self.uav_dict[uav_id]
-        
-        if (uav.current_position.distance(uav.mission_end_point) <= uav.mission_complete_distance):
-            # uav.reached_end_vertiport = True
-            # space_avail = self.check_landing_space_vp()
-            # if not space_avail:
-            if not self.check_landing_space_vp(uav_id):
-            #   hold_at_vertiport(self, uav_id)
-                self.holding_pattern_at_vertiport(uav_id)   
-            else: 
-            #   _landing_procedure(self, landing_uav_id)
-                if uav_id in uav.end_vertiport.landing_queue:
-                    uav.end_vertiport.landing_queue.remove(uav_id)
-                self._landing_procedure(uav_id)
 
-        
+        if not uav.uav_in_flight:
+            return None  # already landed, waiting for reassignment
+
+        if uav.current_position.distance(uav.mission_end_point) > uav.mission_complete_distance:
+            return None  # not there yet
+
+        # Already queued — only retry landing if space has opened
+        if uav_id in uav.end_vertiport.landing_queue:
+            if self.check_landing_space_vp(uav_id):
+                uav.end_vertiport.landing_queue.remove(uav_id)
+                self._landing_procedure(uav_id)
+            return None  # still holding, nothing to do
+
+        # First arrival at destination
+        if not self.check_landing_space_vp(uav_id):
+            self.holding_pattern_at_vertiport(uav_id)
+        else:
+            self._landing_procedure(uav_id)
+
         return None
     
     def holding_pattern_at_vertiport(self, uav_id):
         uav = self.uav_dict[uav_id]
         
-        # add uav_id to END_vertiport's landing queue
-        uav.end_vertiport.landing_queue.append(uav_id)
+        # add uav_id to END_vertiport's landing queue (dedup — only once)
+        if uav_id not in uav.end_vertiport.landing_queue:
+            uav.end_vertiport.landing_queue.append(uav_id)
         
         # update attrs of UAV for HOLDING STATUS 
         uav.current_speed = 0
@@ -310,9 +324,11 @@ class ATC():
         # UAV
         landing_uav = self.uav_dict[landing_uav_id]
         #
-        # Add UAV to Vertiport 
+        # Add UAV to Vertiport and mark as no longer in flight
         landing_vertiport = landing_uav.end_vertiport
         landing_vertiport.uav_id_list.append(landing_uav_id)
+        landing_uav.uav_in_flight = False
+        landing_uav.current_mission_complete_status = True
         
 
 
@@ -378,22 +394,26 @@ class ATC():
 
         return None
     
-    def reassign_new_mission(self, uav_id:int):
+    def reassign_new_mission(self, uav_id: int):
         uav = self.uav_dict[uav_id]
-        
+
         start_vertiport = uav.end_vertiport
-        end_vertiport = random.choice(self.airspace.vertiport_list)
+        # Ensure end ≠ start to avoid a same-vertiport mission (dist_to_goal=0 immediately)
+        candidate_ends = [vp for vp in self.airspace.vertiport_list if vp is not start_vertiport]
+        if not candidate_ends:
+            return None  # only one vertiport in airspace; cannot reassign
+        end_vertiport = random.choice(candidate_ends)
+
         self.assign_mission_start_end_vertiport(uav.id_, start_vertiport, end_vertiport)
 
-        
-
+        # Remove from vertiport's uav_id_list — UAV is being dispatched on a new mission
+        if uav_id in start_vertiport.uav_id_list:
+            start_vertiport.uav_id_list.remove(uav_id)
 
         return None
 
-    def wait_at_vertiport(self,uav_id):
-        uav = self.uav_dict[uav_id]
-        start_vertiport, end_vertiport = uav.end_vertiport, uav.end_vertiport
-        self.assign_mission_start_end_vertiport(uav_id, start_vertiport, end_vertiport)
+    def wait_at_vertiport(self, _uav_id):
+        # UAV remains at vertiport — no mission change or teleportation needed
         return None
 
     #### MISSION CONTROL ####

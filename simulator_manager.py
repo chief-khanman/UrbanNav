@@ -160,7 +160,7 @@ class SimulatorManager:
         self._state = state
         return None
    
-    def step(self, external_control_actions_dict:UAVCommandBundle)->None:
+    def step(self, external_control_actions_dict:UAVCommandBundle):
         '''Update 
         1. timestamp
         2. currentstep
@@ -185,16 +185,25 @@ class SimulatorManager:
         #* all of the above task should be in parallel and asynchronous 
         # check if there is any UAV waiting in landing_queue
         for vertiport in self.airspace.vertiport_list:
+            # Snapshot uav_id_list BEFORE processing landing_queue so UAVs that
+            # land this step aren't immediately reassigned in the same step
+            # (which would reset mission_complete=True before the logger sees it).
+            waiting_uav_ids = list(vertiport.uav_id_list)
+
             if vertiport.get_landing_queue():
-                for uav_id in vertiport.get_landing_queue():
-                    self.atc.has_reached_end_vertiport(uav_id) 
-            # reassign mission for UAVs sitting at vertiports 
-            for uav_id in vertiport.uav_id_list:
-                new_mission =  random.random() > 0.5 
+                for uav_id in list(vertiport.get_landing_queue()):
+                    if uav_id not in self.atc.uav_dict:
+                        continue
+                    self.atc.has_reached_end_vertiport(uav_id)
+            # reassign mission for UAVs that were already sitting at vertiports
+            for uav_id in waiting_uav_ids:
+                if uav_id not in self.atc.uav_dict:
+                    continue
+                new_mission = random.random() > 0.5
                 if new_mission:
                     self.atc.reassign_new_mission(uav_id)
                 else:
-                    self.atc.wait_at_vertiport(uav_id) 
+                    self.atc.wait_at_vertiport(uav_id)
 
         # handle UAVs that have reached vertiports
         #                       or left vertiports 
@@ -202,10 +211,11 @@ class SimulatorManager:
             self.atc.has_left_start_vertiport(uav_id)
             self.atc.has_reached_end_vertiport(uav_id) #! this function shall add the uav to vertiports landing queue
         ####  ---------- ATC-UAV-Vertiport Mission Cycle ----------  ####
-        
+
         # update: current_state.EXTERNAL_SYSTEMS
-            
-        
+
+        return restricted_area_detect, uavs_detect, nmac, restricted_area_collision, uavs_collision
+
 
 
         
