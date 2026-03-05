@@ -7,3 +7,5 @@ TrialScripts
 /.*
 logs
 renders
+*.csv
+*.png
