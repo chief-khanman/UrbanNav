@@ -152,8 +152,15 @@ class MetricsCollector:
                 s['uavs'][uav_id] for s in self._steps if uav_id in s['uavs']
             ]
             if uav_step_snapshots:
-                if any(snap['mission_complete'] for snap in uav_step_snapshots):
-                    missions_completed += 1
+                # Count rising edges (False→True) to handle multiple missions per UAV
+                # and avoid double-counting consecutive True steps (UAV waiting to be
+                # reassigned can stay mission_complete=True for several steps).
+                prev = False
+                for snap in uav_step_snapshots:
+                    curr = snap['mission_complete']
+                    if curr and not prev:
+                        missions_completed += 1
+                    prev = curr
                 all_speeds.extend(snap['speed'] for snap in uav_step_snapshots)
 
             if uav_id in last_step['uavs']:

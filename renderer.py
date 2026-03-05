@@ -22,7 +22,7 @@ class Renderer:
     Visual style follows uam_map_renderer.py:
         - Map boundary: gray fill, alpha 0.5
         - Restricted areas: red fill; buffer: orange, alpha 0.3
-        - Vertiports: green squares ('gs'), markersize 12
+        - Vertiports: green squares ('gs'), markersize 2
         - UAV detection radius: green dashed circle, alpha 0.3
         - UAV NMAC radius: orange circle, alpha 0.4
         - UAV body: solid blue circle, alpha 0.7
@@ -211,12 +211,12 @@ class Renderer:
         # ---- vertiports ----
         if self._airspace is not None:
             for vp in self._airspace.vertiport_list:
-                ax.plot(vp.x, vp.y, 'gs', markersize=12, zorder=5)
-                ax.annotate(
-                    'VP', (vp.x, vp.y),
-                    textcoords='offset points', xytext=(5, 5),
-                    fontsize=7, color='darkgreen',
-                )
+                ax.plot(vp.x, vp.y, 'gs', markersize=2, zorder=5)
+                # ax.annotate(
+                #     'VP', (vp.x, vp.y),
+                #     textcoords='offset points', xytext=(5, 5),
+                #     fontsize=7, color='darkgreen',
+                # )
 
         # ---- UAV trajectories ----
         for uid, pts in traj.items():
@@ -263,14 +263,15 @@ class Renderer:
                 fill=True, color='blue', alpha=0.7, zorder=4,
             ))
 
-            # Heading arrow
-            arrow_len = d['radius'] * 5
-            ax.add_patch(FancyArrowPatch(
-                (x, y),
-                (x + arrow_len * math.cos(hdg), y + arrow_len * math.sin(hdg)),
-                color='black', arrowstyle='->', mutation_scale=10,
-                linewidth=2.5, zorder=5,
-            ))
+            #! TODO fix PID gains so heading arrows are less chaotic before re-enabling this
+            # # Heading arrow
+            # arrow_len = d['radius'] * 5
+            # ax.add_patch(FancyArrowPatch(
+            #     (x, y),
+            #     (x + arrow_len * math.cos(hdg), y + arrow_len * math.sin(hdg)),
+            #     color='black', arrowstyle='->', mutation_scale=10,
+            #     linewidth=2.5, zorder=5,
+            # ))
 
             # UAV ID label
             ax.annotate(
