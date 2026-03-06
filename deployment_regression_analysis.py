@@ -142,9 +142,14 @@ def _save_csv(uav_counts: list, times: list, mems: list) -> None:
 
 
 def _plot(uav_counts: list, times: list, mems: list) -> None:
-    ns  = np.asarray(uav_counts, dtype=float)
-    ref = ns * np.log(ns)
-    ref = ref * (times[0] / ref[0])    # scale so reference passes through first point
+    ns = np.asarray(uav_counts, dtype=float)
+    t0, n0 = times[0], ns[0]
+
+    # All references projected from the first data point (n=500) so they share
+    # the same anchor — shows what each complexity class would predict from there.
+    ref_n     = ns * (t0 / n0)
+    ref_nlogn = ns * np.log(ns) * (t0 / (n0 * np.log(n0)))
+    ref_n2    = ns**2 * (t0 / n0**2)
 
     fig, (ax_t, ax_m) = plt.subplots(1, 2, figsize=(13, 5))
     fig.suptitle(
@@ -154,15 +159,20 @@ def _plot(uav_counts: list, times: list, mems: list) -> None:
     )
 
     # ── time ─────────────────────────────────────────────────────────────────
-    ax_t.plot(ns, times, 'o-', color='steelblue', lw=2, ms=6, label='measured')
-    ax_t.plot(ns, ref,   '--', color='tomato',    lw=1.5,     label=r'$n\,\log n$ (scaled)')
+    # Plot references behind measured; n² shoots off-chart intentionally.
+    ax_t.plot(ns, ref_n2,    ':',  color='mediumpurple', lw=1.5, label=r'$n^2$ (projected from $n{=}500$)')
+    ax_t.plot(ns, ref_nlogn, '--', color='tomato',       lw=1.5, label=r'$n\,\log n$ (projected from $n{=}500$)')
+    ax_t.plot(ns, ref_n,     '-.', color='gray',         lw=1.5, label=r'$n$ (projected from $n{=}500$)')
+    ax_t.plot(ns, times, 'o-', color='steelblue', lw=2, ms=6,   label='measured')
     ax_t.set_xlabel('UAV count  (n)', fontsize=11)
     ax_t.set_ylabel('Total step-loop wall time  (s)', fontsize=11)
     ax_t.set_title('Time vs UAV count')
     ax_t.legend(fontsize=10)
     ax_t.grid(True, alpha=0.35)
     ax_t.set_xlim(left=0)
-    ax_t.set_ylim(bottom=0)
+    # Cap y at n log n ceiling so measured / n / nlogn are all readable;
+    # n² exits the top of the chart immediately, which makes the point visually.
+    ax_t.set_ylim(bottom=0, top=ref_nlogn[-1] * 1.15)
 
     # ── memory ───────────────────────────────────────────────────────────────
     ax_m.plot(ns, mems, 's-', color='darkorange', lw=2, ms=6)
@@ -178,6 +188,19 @@ def _plot(uav_counts: list, times: list, mems: list) -> None:
     fig.savefig(path, dpi=150)
     plt.close(fig)
     print(f'[Regression] Plot  → {path}')
+
+
+def replot_from_csv() -> None:
+    """Regenerate regression_analysis.png from an existing regression_results.csv."""
+    path = os.path.join(_DIR, 'regression_results.csv')
+    uav_counts, times, mems = [], [], []
+    with open(path, newline='') as f:
+        for row in csv.DictReader(f):
+            uav_counts.append(int(row['n_uavs']))
+            times.append(float(row['step_loop_time_s']))
+            mems.append(float(row['live_mem_kb']))
+    _plot(uav_counts, times, mems)
+    print('[Regression] Replot complete.')
 
 
 # ── main ─────────────────────────────────────────────────────────────────────
@@ -211,4 +234,7 @@ def main() -> None:
 
 
 if __name__ == '__main__':
-    main()
+    if '--plot-only' in sys.argv:
+        replot_from_csv()
+    else:
+        main()

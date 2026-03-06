@@ -4,7 +4,7 @@
 #### CONFIG ####
 simulator:
   dt: 1.0
-  total_timestep: 500   # small for quick deployment runs
+  total_timestep: 3000   # small for quick deployment runs
   mode: '2D'            # or '3D'
   seed: 123
 
