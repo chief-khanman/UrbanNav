@@ -23,7 +23,8 @@ class HolonomicPIDController(Controller):
       - plan_holonomic.py (HolonomicPlanner): supplies the current target waypoint.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, dt) -> None:
+        super().__init__(dt=dt)
         # Proportional gain: maps distance to a desired-speed magnitude.
         self.Kp_speed: float = 0.5
         # Proportional gain on velocity error → acceleration command.
@@ -65,8 +66,8 @@ class HolonomicPIDController(Controller):
         err_vy = desired_vy - uav.vy
 
         # 4. PD acceleration commands.
-        ax = self.Kp_accel * err_vx + self.Kd_accel * (err_vx - self._prev_err_vx) / uav.dt
-        ay = self.Kp_accel * err_vy + self.Kd_accel * (err_vy - self._prev_err_vy) / uav.dt
+        ax = self.Kp_accel * err_vx + self.Kd_accel * (err_vx - self._prev_err_vx) / self.dt
+        ay = self.Kp_accel * err_vy + self.Kd_accel * (err_vy - self._prev_err_vy) / self.dt
 
         self._prev_err_vx = err_vx
         self._prev_err_vy = err_vy

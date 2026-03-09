@@ -134,7 +134,7 @@ class AerBus:
             elif controller_name in CONTROLLER_CLASS_MAP:
                 # INLINE: one stateful instance per UAV (PID keeps prev_yaw_error, etc.)
                 for uav_id in uav_id_list:
-                    instance = CONTROLLER_CLASS_MAP[controller_name]()
+                    instance = CONTROLLER_CLASS_MAP[controller_name](self.config.simulator.dt) #added dt for controller that needs to be synced with global dt
                     self.register_controller(controller_name, [uav_id],
                                              ExecutionMode.INLINE, instance=instance)
 

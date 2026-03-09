@@ -5,9 +5,10 @@ from typing import Any
 
 
 class Controller(ABC):
-    def __init__(self):
+    def __init__(self, dt, mode='undef'):
+        self.mode:str = mode
         self.controller_type = None
-        self.mode:str
+        self.dt = dt
 
     @abstractmethod 
     def get_control_action(self, *args, **kwargs) -> Any:
