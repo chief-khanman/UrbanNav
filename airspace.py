@@ -354,8 +354,8 @@ class Airspace:
             random.seed(self.seed)
             np.random.seed(self.seed)
 
-        if num_vertiports > len(self.vertiport_list) - self.max_num_vps_airspace:
-            raise RuntimeError('Exceeds max vertiport number defined for airspace, reduce number of vertiports to be added to vertiport_list')
+        # if num_vertiports > len(self.vertiport_list) - self.max_num_vps_airspace:
+        #     raise RuntimeError('Exceeds max vertiport number defined for airspace, reduce number of vertiports to be added to vertiport_list')
 
         if self.airspace_restricted_area_tag_list:
             sample_space = self.location_utm_gdf['geometry'].iloc[0]
@@ -370,8 +370,14 @@ class Airspace:
         sample_vertiport_array: np.ndarray = shapely.get_parts(sample_vertiport[0])
 
         for location in sample_vertiport_array:
+            #TODO: add z dim to vertiport
+            #* FIX procedure : 
+            #  add height to geopandas dataframe - such that each polygon in location_utm has a corresponding height attr 
+            
+            # quick fix - Mar, 2026
+            location = Point(location.x, location.y, random.randint(1500, 3500)) # a,b is set to show range of possible UAV flight altitude 
             self.vertiport_list.append(
-                Vertiport(location=location, uav_list=[])
+                Vertiport(location=location)
             )
 
         print(f"Created {len(self.vertiport_list)} vertiports with seed {self.seed}")
