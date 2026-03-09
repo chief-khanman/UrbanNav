@@ -40,10 +40,7 @@ class Vertiport:
         return self.landing_queue
 
     def get_uav_list(self,):
-        pass
-
-    def update_queue(self,):
-        pass
+        return self.uav_id_list
     
 
 if __name__ == '__main__':
