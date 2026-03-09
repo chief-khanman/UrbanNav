@@ -91,8 +91,9 @@ class PlannerEngine:
             plan_dict: { uav_id(int) -> List[Point] } current plan for each UAV.
         """
         for uav_id, plan_model in self.plan_obj_map.items():
-            uav = self.uav_dict[uav_id]
-            self.plan_dict[uav_id] = plan_model.get_plan(uav.current_position)
+            if uav_id in self.uav_dict:
+                uav = self.uav_dict[uav_id]
+                self.plan_dict[uav_id] = plan_model.get_plan(uav.current_position)
         return self.plan_dict
 
     def set_plans(self, *args, **kwargs):
