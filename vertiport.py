@@ -5,10 +5,10 @@ from typing import List
 
 # WORKING:  --- Feb 25, 2026
 class Vertiport:
-    def __init__(self, location: Point, uav_id_list: list = []) -> None:
+    def __init__(self, location: Point) -> None:
         self.id = id(self)
         self.location = location
-        self.uav_id_list: List = uav_id_list
+        self.uav_id_list: List = []
         # vertiport capacity 
         self.landing_takeoff_capacity = 4
         # vertiport region id/number
@@ -17,8 +17,7 @@ class Vertiport:
         
         #landing queue
         self.landing_queue: deque = deque()
-        #takeoff queue
-        self.takeoff_queue: deque = deque()
+
     
     def __repr__(
         self,
@@ -39,12 +38,6 @@ class Vertiport:
     def get_landing_queue(self):
         '''Return list of UAV_id waiting to land.'''
         return self.landing_queue
-
-
-    def get_takeoff_queue(self):
-        '''Return list of UAV_id waiting to take off'''
-        return self.takeoff_queue
-
 
     def get_uav_list(self,):
         pass
