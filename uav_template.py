@@ -104,6 +104,7 @@ class UAV_template(ABC):
 
         # UAV mission completion epsilon distance
         self.mission_complete_distance = 40 # Increased from 10 to 40 to account for UAV overshotting goal between updates
+        self.vertiport_reach_distance = 100
         self.current_mission_complete_status: bool
         
         # UAV operational_status
