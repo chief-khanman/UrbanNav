@@ -96,22 +96,29 @@ class PartialSensor(Sensor):
         Returns:
             List of detected UAV IDs (excludes uav_id itself).
         """
+
         uav = self._uav_dict[uav_id]
         candidates = self._spatial_hash.query(
             (uav.px, uav.py, uav.pz), uav.detection_radius
         )
 
         detected: List[int] = []
-        for candidate_id in candidates:
-            if candidate_id == uav_id:
-                continue
-            other = self._uav_dict.get(candidate_id)
-            if other is None:
-                continue
-            dist = _euclidean_3d(uav.px, uav.py, uav.pz,
-                                  other.px, other.py, other.pz)
-            if dist <= uav.detection_radius:
-                detected.append(candidate_id)
+        
+        # if UAV sensors are active fill the detected list 
+        if uav.get_sensor_operational():
+            for candidate_id in candidates:
+                if candidate_id == uav_id:
+                    continue
+                other = self._uav_dict.get(candidate_id)
+                if other is None:
+                    continue
+                dist = _euclidean_3d(uav.px, uav.py, uav.pz,
+                                    other.px, other.py, other.pz)
+                if dist <= uav.detection_radius:
+                    detected.append(candidate_id)
+        else:
+            detected = []
+        
         return detected
 
     def get_nmac(self, uav_id: int) -> List[int]:
@@ -183,3 +190,18 @@ class PartialSensor(Sensor):
             return []
         # TODO: implement shapely intersection check against ra_geo_series
         return []
+
+    def _turn_off_landing_sensor(self, uav_id):
+        uav = self._uav_dict[uav_id]
+        if uav.current_position.distance(uav.end_vertiport.location) <= uav.sensor_shutoff_distance:
+            return True 
+        else:
+            return False 
+        
+    def _turn_off_takeoff_sensor(self, uav_id):
+        uav = self._uav_dict[uav_id]
+        if uav.current_position.distance(uav.start_vertiport.location) <= uav.sensor_shutoff_distance:
+            return True 
+        else:
+            return False 
+        

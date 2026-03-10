@@ -37,7 +37,8 @@ class SimulatorManager:
             return Airspace(location_name=self.config.airspace.location_name,
                             number_of_vertiports=self.config.airspace.number_of_vertiports,
                             vertiport_tag_list=self.config.airspace.vertiport_tag_list,
-                            airspace_restricted_area_tag_list=self.config.airspace.airspace_restricted_area_tag_list
+                            airspace_restricted_area_tag_list=self.config.airspace.airspace_restricted_area_tag_list,
+                            seed=self.seed
                             )
     
     def _init_atc(self):
@@ -86,7 +87,7 @@ class SimulatorManager:
     def _build_assets(self,):
         #### ----------- VP ----------- ####
         # create vertiports
-        num_vp = self.config.airspace.number_of_vertiports * self.config.vertiport.number_of_landing_pad
+        num_vp = self.config.airspace.number_of_vertiports 
         # change this method to build vertiports in different ways 
         self.airspace.add_n_random_vps_to_vplist(num_vertiports=num_vp)
         
@@ -163,6 +164,7 @@ class SimulatorManager:
         5. external_systems
         '''
         # update: current_state.STEP
+        #print(f'current_timestep: {self._state.currentstep}')
         self._state.currentstep += 1
 
         # stepS_uav: control_action -> dynamics -> state update          
@@ -177,24 +179,39 @@ class SimulatorManager:
         #*            TAKEOFF 
         #*            NEW ASSIGNMENT 
         #* all of the above task should be in parallel and asynchronous 
-        # check if there is any UAV waiting in landing_queue
-        for vertiport in self.airspace.vertiport_list:
-            if vertiport.get_landing_queue():
-                for uav_id in vertiport.get_landing_queue():
-                    self.atc.has_reached_end_vertiport(uav_id) 
-            # reassign mission for UAVs sitting at vertiports 
-            for uav_id in vertiport.uav_id_list:
-                new_mission =  random.random() > 0.5 
-                if new_mission:
-                    self.atc.reassign_new_mission(uav_id)
-                else:
-                    self.atc.wait_at_vertiport(uav_id) 
-
         # handle UAVs that have reached vertiports
         #                       or left vertiports 
+        
         for uav_id in self.atc.uav_dict.keys():
             self.atc.has_left_start_vertiport(uav_id)
+            
+            #! How can the same uav_id leave and reach at the same time 
+            #* logic for has_reached_end_vertiport() changed so this makes sense 
+            # has_reached_end_vertiport() -> check implementation 
             self.atc.has_reached_end_vertiport(uav_id) #! this function shall add the uav to vertiports landing queue
+        
+        #### delete after debug ####
+        # `for vertiport in self.airspace.vertiport_list:
+        #     print(f'Vertiport: {vertiport.id} has uav_id :{vertiport.uav_id_list}')`
+        #### delete after debug #### 
+        
+        for vertiport in self.airspace.vertiport_list:
+            # print(f'Vertiport: {vertiport.id} has uav_id :{vertiport.uav_id_list}')
+            if vertiport.uav_id_list:
+                for uav_id in vertiport.uav_id_list:
+                    if not self.atc.uav_dict[uav_id].operational and not self.atc.uav_dict[uav_id].uav_in_flight: 
+                        new_mission =  random.random() > 0.5 
+                        if new_mission:
+                            # print(f'ATC uav ids: {self.atc.uav_dict} ')
+                            # print(f'UAV id: {uav_id}, of UAV: {self.atc.uav_dict[uav_id]}')
+                            self.atc.reassign_new_mission(uav_id) #! getting added to vertiport.uav_id_list
+                        else:
+                            self.atc.wait_at_vertiport(uav_id) #! getting added to vertiport.uav_id_list
+            
+            if vertiport.check_landing_space() and vertiport.get_landing_queue():
+                landing_uav_id = vertiport.landing_queue[0]
+                self.atc.landing_procedure(landing_uav_id)
+
         ####  ---------- ATC-UAV-Vertiport Mission Cycle ----------  ####
         
         # update: current_state.EXTERNAL_SYSTEMS
@@ -297,12 +314,13 @@ class SimulatorManager:
         nmac_dict = self.sensor_module.get_nmac()
         collision_dict_restricted_area = self.sensor_module.get_collision_restricted_area()
         collision_dict_uavS = self.sensor_module.get_collision_uavS()
-
+        print(f'Collision ids: {collision_dict_uavS}')
         ### REMOVE UAV ###
         # remove UAVs that have collided
         #! check vertiports 
         uavs_to_remove = self._merge_collision_dicts(collision_dict_uavS, collision_dict_restricted_area)
         self.atc.remove_uavs_by_id(uavs_to_remove)
+        
         # record their stats/metrics 
         
         return detection_dict_restricted_area, detection_dict_uavS, nmac_dict, collision_dict_restricted_area, collision_dict_uavS

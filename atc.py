@@ -1,6 +1,6 @@
 import time
 import math
-from copy import copy
+from copy import deepcopy
 import random
 import numpy as np
 from typing import List, Tuple, Type, Dict
@@ -123,14 +123,23 @@ class ATC():
         Returns:
             None
         """
-        print(f'Current UAV list: {self.uav_dict.values()}')
+        #print(f'Current UAV list: {self.uav_dict.values()}')
         
         for uav_id in ids_to_remove:
-            print('Removed UAV: ')
-            self.uav_dict.pop(uav_id) 
-        
-        time.sleep(1)
-        print(f'Updated UAV list: {self.uav_dict.values()}')
+            print(f'Removed UAV: {uav_id}')
+            removed_uav = self.uav_dict.pop(uav_id)
+            #! should the vertiport uav_id_list be queried ???
+            if removed_uav.id_ in removed_uav.start_vertiport.uav_id_list:
+                print(f'Removing from start vertiport list: {removed_uav.start_vertiport.uav_id_list}') 
+                removed_uav.start_vertiport.uav_id_list.remove(uav_id)
+            elif removed_uav.id_ in removed_uav.end_vertiport.uav_id_list: 
+                print(f'Removing from end vertiport list: {removed_uav.end_vertiport.uav_id_list}') 
+                removed_uav.end_vertiport.uav_id_list.remove(uav_id) 
+            else:
+                print('Removal during operation')
+            
+        #time.sleep(1)
+        #print(f'Updated UAV list: {self.uav_dict.values()}')
         
         return None
     
@@ -198,9 +207,14 @@ class ATC():
         uav = self.uav_dict[uav_id]
         
         # Assign start and end vertiports to the UAV
-        uav.assign_start_end(start, end, self.airspace_mid_point_coord) #    
-        self._update_start_vertiport_of_uav(uav_id, start)
-        self._update_end_vertiport_of_uav(uav_id, end)
+        uav.assign_start_end(start, end, self.airspace_mid_point_coord) # 
+        # assign UAV to vertiport list 
+        uav.start_vertiport.uav_id_list.append(uav.id_) 
+        #print(f'at vertiport: {uav.start_vertiport.id} we have uav: {uav.start_vertiport.uav_id_list}')
+        #* FIX - what is the update_start_vertiport actually doing 
+        #self._update_start_vertiport_of_uav(uav_id, start)
+        
+        #self._update_end_vertiport_of_uav(uav_id, end)
         return None
 
     #FIX: #### START ####
@@ -223,7 +237,7 @@ class ATC():
         """
         uav = self.uav_dict[uav_id]
 
-        if (uav.current_position.distance(uav.mission_start_point) > 100):
+        if (uav.current_position.distance(uav.mission_start_point) >= uav.vertiport_exit_distance) and (not uav.has_left_start) : 
             self._takeoff_procedure(uav_id)
 
         return None
@@ -243,6 +257,9 @@ class ATC():
         """
         
         outgoing_uav = self.uav_dict[outgoing_uav_id]
+        outgoing_uav.has_left_start = True
+        #TODO: have not added UAV to vertiports UAV list during UAV init - thats why cannot remove from a vp_list 
+        print(f'UAV id: {outgoing_uav.id_}. Vertiport uav_id_list: {outgoing_uav.start_vertiport.uav_id_list}' )
         outgoing_uav.start_vertiport.uav_id_list.remove(outgoing_uav_id)
 
         return None
@@ -261,19 +278,17 @@ class ATC():
             None
         """
         uav = self.uav_dict[uav_id]
+
+        # WORKING:  --- Mar 8, 2026        
+        # New logic 
         
-        if (uav.current_position.distance(uav.mission_end_point) <= uav.mission_complete_distance):
-            # uav.reached_end_vertiport = True
-            # space_avail = self.check_landing_space_vp()
-            # if not space_avail:
-            if not self.check_landing_space_vp(uav_id):
-            #   hold_at_vertiport(self, uav_id)
-                self.holding_pattern_at_vertiport(uav_id)   
-            else: 
-            #   _landing_procedure(self, landing_uav_id)
-                if uav in uav.end_vertiport.landing_queue:
-                    uav.end_vertiport.landing_queue.remove(uav_id)
-                self._landing_procedure(uav_id)
+        if (uav.current_position.distance(uav.mission_end_point) <= uav.mission_complete_distance) and (not uav.has_reached_end):
+            # for any UAV that has just arrived near end vertiport APPEND TO DQ - this is a container for UAV que for landing 
+            self.holding_pattern_at_vertiport(uav_id)        
+            
+            
+
+            
 
         
         return None
@@ -284,6 +299,7 @@ class ATC():
         # add uav_id to END_vertiport's landing queue
         uav.end_vertiport.landing_queue.append(uav_id)
         
+        print(f'UAV id: {uav.id_}. UAV end vertiport: {uav.end_vertiport.id}, has uav_id:{uav.end_vertiport.uav_id_list}, dq uav_id: {uav.end_vertiport.get_landing_queue()}')
         # update attrs of UAV for HOLDING STATUS 
         uav.current_speed = 0
         uav.current_vel = (0,0)
@@ -292,7 +308,7 @@ class ATC():
         #TODO: turn off sensors during hold - to avoid detection/nmac/collision
         #raise PendingDeprecationWarning('This holding pattern will change')
         
-    def _landing_procedure(self, landing_uav_id: int) -> None:
+    def landing_procedure(self, landing_uav_id: int) -> None:
         """
         Once a landing spot is confirmed at Vertiport,
         performs the landing procedure for a given UAV.
@@ -305,10 +321,15 @@ class ATC():
         """
         # UAV
         landing_uav = self.uav_dict[landing_uav_id]
+        landing_uav.has_reached_end = True
+        landing_uav.operational = False 
+        landing_uav.uav_in_flight = False 
         #
         # Add UAV to Vertiport 
         landing_vertiport = landing_uav.end_vertiport
+        landing_vertiport.landing_queue.remove(landing_uav_id)
         landing_vertiport.uav_id_list.append(landing_uav_id)
+        print(f'UAV id: {landing_uav_id} landed at vertiport id: {landing_vertiport.id}')
         
 
 
@@ -376,10 +397,16 @@ class ATC():
     
     def reassign_new_mission(self, uav_id:int):
         uav = self.uav_dict[uav_id]
-        
+        #! NO more adding to vertiport.uav_id_list 
         start_vertiport = uav.end_vertiport
-        end_vertiport = random.choice(self.airspace.vertiport_list)
-        self.assign_mission_start_end_vertiport(uav.id_, start_vertiport, end_vertiport)
+        while True:
+            end_vertiport = random.choice(self.airspace.vertiport_list)
+            if end_vertiport != start_vertiport:
+                break
+        uav.assign_start_end(start_vertiport, end_vertiport)
+        print(f'Reassigned new mission to UAV id: {uav.id_}')
+
+        #self.assign_mission_start_end_vertiport(uav.id_, start_vertiport, end_vertiport)
 
         
 
@@ -388,9 +415,19 @@ class ATC():
 
     def wait_at_vertiport(self,uav_id):
         uav = self.uav_dict[uav_id]
-        start_vertiport, end_vertiport = uav.end_vertiport, uav.end_vertiport
-        self.assign_mission_start_end_vertiport(uav_id, start_vertiport, end_vertiport)
+        uav.start_vertiport, uav.end_vertiport = uav.end_vertiport, uav.end_vertiport
+        #uav.assign_start_end(start_vertiport, end_vertiport)
+        uav.current_position = uav.end_vertiport.location
+        uav.operational = False
+        uav.uav_in_flight = False
+        uav.current_speed = 0
+        #! NO more adding to vertiport.uav_id_list
+        #self.assign_mission_start_end_vertiport(uav_id, start_vertiport, end_vertiport)
+        print(f'UAV id: {uav.id_} waiting at vertiport id: {uav.start_vertiport.id}. Start vp == end vp: {uav.start_vertiport.id == uav.end_vertiport.id}')
         return None
+    
+    
+    
 
     #### MISSION CONTROL ####
     
@@ -425,35 +462,46 @@ class ATC():
             self.assignment_type = assignment_type
             
             if assignment_type == 'random':
-                # Each UAV gets a random pair of distinct vertiports
-                available_starts = self.airspace.vertiport_list.copy()
-                available_ends = self.airspace.vertiport_list.copy()
-                
                 for uav in self.uav_dict.values():
-                    # Select random start vertiport
-                    start_vertiport = random.choice(available_starts)
-                    available_starts.remove(start_vertiport)
+                    start_vertiport = random.choice(self.airspace.vertiport_list)
+                    while True:
+                        end_vertiport = random.choice(self.airspace.vertiport_list)
+                        if start_vertiport is not end_vertiport:
+                            break
+                    self.assign_mission_start_end_vertiport(uav.id_, start_vertiport, end_vertiport)
                     
-                    # Create a temporary list excluding the start vertiport
-                    temp_ends = [v for v in available_ends if v != start_vertiport]
+                        
+                # # Each UAV gets a random pair of distinct vertiports
+                # available_starts = deepcopy(self.airspace.vertiport_list)
+                # available_ends = deepcopy(self.airspace.vertiport_list)
+                
+                # for uav in self.uav_dict.values():
+                #     print(f'current uav id : {uav.id_}')
+                #     # Select random start vertiport
+                #     start_vertiport = random.choice(available_starts)
+                #     available_starts.remove(start_vertiport)
                     
-                    # If no valid end vertiports, reuse one
-                    if not temp_ends:
-                        temp_ends = [v for v in self.airspace.vertiport_list if v != start_vertiport]
+                #     # Create a temporary list excluding the start vertiport
+                #     temp_ends = [v for v in available_ends if v != start_vertiport]
                     
-                    # Select random end vertiport
-                    end_vertiport = random.choice(temp_ends)
-                    if end_vertiport in available_ends:
-                        available_ends.remove(end_vertiport)
+                #     # If no valid end vertiports, reuse one
+                #     if not temp_ends:
+                #         temp_ends = [v for v in self.airspace.vertiport_list if v != start_vertiport]
                     
-                    # Assign to UAV
-                    uav.assign_start_end(start_vertiport, end_vertiport)
+                #     # Select random end vertiport
+                #     end_vertiport = random.choice(temp_ends)
+                #     if end_vertiport in available_ends:
+                #         available_ends.remove(end_vertiport)
                     
-                    # Replenish available vertiports if necessary
-                    if not available_starts:
-                        available_starts = self.airspace.vertiport_list.copy()
-                    if not available_ends:
-                        available_ends = self.airspace.vertiport_list.copy()
+                #     # Assign to UAV
+                #     self.assign_mission_start_end_vertiport(uav.id_, start_vertiport, end_vertiport)
+                #     # uav.assign_start_end(start_vertiport, end_vertiport)
+                    
+                #     # Replenish available vertiports if necessary
+                #     if not available_starts:
+                #         available_starts = self.airspace.vertiport_list.copy()
+                #     if not available_ends:
+                #         available_ends = self.airspace.vertiport_list.copy()
             
             elif assignment_type == 'optimal':
                 # Assign vertiports to minimize total distance or conflicts

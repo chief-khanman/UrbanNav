@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.abspath(PROJECT_ROOT))
 
 from uam_simulator import UAMSimulator
 
-N_STEPS = 100
+N_STEPS = 10000
 
 
 @pytest.fixture(scope='module')

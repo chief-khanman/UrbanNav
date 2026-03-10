@@ -78,9 +78,9 @@ class UAVTypeConfig(BaseModel):
 # Each key must appear in VALID_UAVS.
 UAV_TYPE_REGISTRY.update({
     'STANDARD': UAVTypeConfig(
-        radius=0.5,
-        nmac_radius=1.0,
-        detection_radius=10.0,
+        radius=17.0,
+        nmac_radius=200.0,
+        detection_radius=500.0,
         max_speed=10.0,
         max_acceleration=3.0,
         max_heading_change=math.pi,

@@ -37,3 +37,7 @@ class PointMass(Dynamics):
         uav.vy = uav.current_speed * math.sin(uav.current_heading)
         # uav.vz -> unchanged
         uav.current_position = Point(uav.current_position.x + uav.vx * self.dt, uav.current_position.y + uav.vy * self.dt)
+
+    def update(self, uav_id, action):
+        super().update(uav_id, action)
+        

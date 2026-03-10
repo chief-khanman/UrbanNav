@@ -42,6 +42,12 @@ class Vertiport:
     def get_uav_list(self,):
         return self.uav_id_list
     
+    def check_landing_space(self,):
+        if len(self.uav_id_list) < self.landing_takeoff_capacity:
+            return True
+        else:
+            return False 
+    
 
 if __name__ == '__main__':
     random_vertiport = Vertiport(Point(12,13))

@@ -103,8 +103,9 @@ class UAV_template(ABC):
 
 
         # UAV mission completion epsilon distance
-        self.mission_complete_distance = 40 # Increased from 10 to 40 to account for UAV overshotting goal between updates
-        self.vertiport_reach_distance = 100
+        self.mission_complete_distance = 2 * self.radius # Increased from 10 to 40 to account for UAV overshotting goal between updates
+        self.vertiport_exit_distance = 2 * self.radius 
+        self.sensor_shutoff_distance = 3 * self.radius
         self.current_mission_complete_status: bool
         
         # UAV operational_status
@@ -112,7 +113,8 @@ class UAV_template(ABC):
         # once UAV reaches end point - many attrs of UAV are changes to OFF/False 
         # have a new method update attrs once UAV reaches end, 
         self.operational:bool 
-       
+        self.has_left_start:bool
+        self.has_reached_end:bool
         # UAV state - at vertiport or in flight 
         self.uav_in_flight:bool #
 
@@ -202,7 +204,8 @@ class UAV_template(ABC):
         # once UAV reaches end point - many attrs of UAV are changes to OFF/False 
         # have a new method update attrs once UAV reaches end, 
         self.operational:bool = True
-       
+        self.has_left_start = False 
+        self.has_reached_end = False 
         # UAV state - at vertiport or in flight 
         self.uav_in_flight:bool = True
         
@@ -214,6 +217,13 @@ class UAV_template(ABC):
         
         return None
 
+    
+    def get_sensor_operational(self, ):
+        if self.current_position.distance(self.start_vertiport.location) <= self.sensor_shutoff_distance or self.current_position.distance(self.end_vertiport.location) <= self.sensor_shutoff_distance:
+            return False
+        else: 
+            return True  
+    
     @abstractmethod
     def get_mission_status(self) -> bool:
         """
@@ -222,7 +232,7 @@ class UAV_template(ABC):
         Returns:
             bool: True if the UAV is within the mission completion distance from the target, False otherwise.
         """
-        if self.current_position.distance(self.mission_start_point) <= self.mission_complete_distance:
+        if self.current_position.distance(self.mission_end_point) <= self.mission_complete_distance:
             self.current_mission_complete_status = True
         else:
             self.current_mission_complete_status = False
