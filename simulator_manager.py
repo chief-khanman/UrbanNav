@@ -261,8 +261,8 @@ class SimulatorManager:
     
     def _merge_collision_dicts(
         self,
-        collision_dict_uavS: Dict[int, List[int]],
-        collision_dict_ra: Dict[int, List[int]]
+        collision_dict_uavS: Dict[int, set[int]],
+        collision_dict_ra: Dict[int, set[int]]
     ) -> List[int]:
         """
         Extract all UAV IDs to remove from both collision dicts.
