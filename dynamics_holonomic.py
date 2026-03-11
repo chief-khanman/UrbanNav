@@ -22,7 +22,7 @@ class HolonomicDynamics(Dynamics):
     def __init__(self) -> None:
         super().__init__()
 
-    def update(self, _uav_id: str, _action) -> None:
+    def update(self, uav_id: str, action) -> None:
         """Not used by DynamicsEngine; step() is the primary interface."""
         return None
 
