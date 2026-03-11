@@ -49,7 +49,12 @@ class MetricsCollector:
         uav_snapshots: Dict[int, Dict[str, Any]] = {}
         for uav_id, uav in uav_dict.items():
             pos = uav.current_position
+            
+            #TODO: remove try/except block 
             try:
+                #TODO: add this as an attr, that's updated during
+                # simulator_manager.step() -> dynamics_engine.step() ...
+                # ... -> dynamics[uav_instance].step() <update dist_2_goal> HERE
                 dist_to_goal = pos.distance(uav.mission_end_point)
             except AttributeError:
                 dist_to_goal = None
@@ -61,7 +66,8 @@ class MetricsCollector:
                 'heading':         getattr(uav, 'current_heading', 0.0),
                 'vx':              getattr(uav, 'vx', 0.0),
                 'vy':              getattr(uav, 'vy', 0.0),
-                'nmac_count':      getattr(uav, 'nmac_count', 0),
+                #TODO: fix logic for incrementing nmac_count - sensor[uav_instance].get_nmac() -> increment uav.nmac_count 
+                'nmac_count':      getattr(uav, 'nmac_count', 0), #! sensor does not increment NMAC count 
                 'mission_complete': getattr(uav, 'current_mission_complete_status', False),
                 'dist_to_goal':    dist_to_goal,
             }
