@@ -289,15 +289,6 @@ class ATC():
             # for any UAV that has just arrived near end vertiport APPEND TO DQ - this is a container for UAV que for landing 
             self.holding_pattern_at_vertiport(uav_id)        
             
-            
-
-            
-
-        # First arrival at destination
-        if not self.check_landing_space_vp(uav_id):
-            self.holding_pattern_at_vertiport(uav_id)
-        else:
-            self._landing_procedure(uav_id)
 
         return None
     
@@ -414,12 +405,6 @@ class ATC():
                 break
         uav.assign_start_end(start_vertiport, end_vertiport)
         print(f'Reassigned new mission to UAV id: {uav.id_}')
-
-        #self.assign_mission_start_end_vertiport(uav.id_, start_vertiport, end_vertiport)
-
-        # Remove from vertiport's uav_id_list — UAV is being dispatched on a new mission
-        if uav_id in start_vertiport.uav_id_list:
-            start_vertiport.uav_id_list.remove(uav_id)
 
         return None
 
