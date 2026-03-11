@@ -16,9 +16,10 @@ class PIDPointMassController(Controller):
         dx = target_pos.x - uav.px
         dy = target_pos.y - uav.py
         distance = np.hypot(dx, dy)
-        
+
         # 1. Speed Control: Slow down as we approach the target
         target_speed = min(uav.max_speed, distance * self.Kp_speed)
+        accel_cmd = self.Kp_speed * (target_speed - uav.current_speed)
         accel_cmd = self.Kp_speed * (target_speed - uav.current_speed)
 
         # 2. Heading Control: Calculate angle to target

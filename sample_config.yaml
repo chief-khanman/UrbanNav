@@ -1,45 +1,44 @@
 # UAM Simulator Configuration
 # component_schema.py structure has to respect this config.yaml
 
-# new types can be added here
-# provide a class/name for uav, and its attrs as described
-
-
 #### CONFIG ####
 simulator:
-  dt: 0.5
-  total_timestep: 10000
-  mode: '2D' # or 3D - used for rendering and dynamics, controller and sensor check
-  seed: 123456
+  dt: 1.0
+  total_timestep: 3000   # small for quick deployment runs
+  mode: '2D'            # or '3D'
+  seed: 123
+
+logging:
+  enabled: true
+  log_dir: 'logs'       # episode data saved under logs/episode_<id>_<timestamp>/
+
+rendering:
+  enabled: true
+  mode: 'offline'       # 'realtime', 'offline', or 'both'
+  output_dir: 'renders'
+  output_filename: 'episode'
+  realtime_sleep: 0.01  # seconds to pause between real-time frames
+  frame_skip: 4         # render every (frame_skip+1) steps; 0=every step, 4=every 5th
 
 vertiport:
   number_of_landing_pad: 3
 
 airspace:
   location_name: 'Austin, Texas, USA'
-  number_of_vertiports: 11
-  vertiport_tag_list: [['building', 'commercial']]
+  number_of_vertiports: 3
+  vertiport_tag_list: [['building', 'yes']]
   airspace_restricted_area_tag_list: [['building', 'office']]
 
-
-
-# this whole section needs to communicate with AER_BUS and ATC
-# LEARNING is the only reserved type_name - strictly for UAV using RL controller during training phase
+# controller must be a key in VALID_CONTROLLERS   (component_schema.py)
+# dynamics  must be a key in VALID_DYNAMICS        (component_schema.py)
+# planner   must be a key in VALID_PLANNERS        (component_schema.py)
+# sensor    must be a key in VALID_SENSORS         (component_schema.py)
 fleet_composition:
   - type_name: STANDARD
-    count: 2 # ATC handles id and type_name for dynamics, controller, and state update
+    count: 3
     dynamics: PointMass
     controller: PIDPointMassController
-    sensor: PartialSensor # OR GlobalSensor
-    planner: PointMass-PID 
- 
-  - type_name: HEAVY
-    count: 3 # ATC handles id and type_name for dynamics, controller, and state update
-    dynamics: PointMass
-    controller: PIDPointMassController
-    sensor: PartialSensor # OR GlobalSensor
-    planner: PointMass-PID 
-   
-
+    sensor: PartialSensor
+    planner: PointMass-PID
 
 #### CONFIG ####

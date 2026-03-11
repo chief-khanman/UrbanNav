@@ -155,7 +155,7 @@ class SimulatorManager:
         self._state = state
         return None
    
-    def step(self, external_control_actions_dict:UAVCommandBundle)->None:
+    def step(self, external_control_actions_dict:UAVCommandBundle):
         '''Update 
         1. timestamp
         2. currentstep
@@ -213,10 +213,11 @@ class SimulatorManager:
                 self.atc.landing_procedure(landing_uav_id)
 
         ####  ---------- ATC-UAV-Vertiport Mission Cycle ----------  ####
-        
+
         # update: current_state.EXTERNAL_SYSTEMS
-            
-        
+
+        return restricted_area_detect, uavs_detect, nmac, restricted_area_collision, uavs_collision
+
 
 
         
@@ -262,8 +263,8 @@ class SimulatorManager:
     
     def _merge_collision_dicts(
         self,
-        collision_dict_uavS: Dict[int, List[int]],
-        collision_dict_ra: Dict[int, List[int]]
+        collision_dict_uavS: Dict[int, set[int]],
+        collision_dict_ra: Dict[int, set[int]]
     ) -> List[int]:
         """
         Extract all UAV IDs to remove from both collision dicts.

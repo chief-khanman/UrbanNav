@@ -354,13 +354,13 @@ class Airspace:
             random.seed(self.seed)
             np.random.seed(self.seed)
 
-        # if num_vertiports > len(self.vertiport_list) - self.max_num_vps_airspace:
-        #     raise RuntimeError('Exceeds max vertiport number defined for airspace, reduce number of vertiports to be added to vertiport_list')
+        if num_vertiports > self.max_num_vps_airspace - len(self.vertiport_list):
+            raise RuntimeError('Exceeds max vertiport number defined for airspace, reduce number of vertiports to be added to vertiport_list')
 
         if self.airspace_restricted_area_tag_list:
             sample_space = self.location_utm_gdf['geometry'].iloc[0]
             for tag_value in self.location_tags.keys():
-                sample_space = shapely.difference(sample_space, self.location_utm_buffer[tag_value].union_all())
+                sample_space = shapely.difference(sample_space, self.location_utm_buffer[tag_value].unary_union)
             sample_space_gdf = GeoSeries(sample_space)
         else: 
             sample_space = self.location_utm_gdf

@@ -103,7 +103,7 @@ class SensorEngine:
     # Per-step query methods (called by SimulatorManager._step_uavS())
     # ------------------------------------------------------------------
 
-    def get_detection_other_uavS(self) -> Dict[int, List]:
+    def get_detection_other_uavS(self) -> Dict[int, set]:
         """Rebuild spatial hashes then return detected UAV IDs per UAV.
 
         This is the designated once-per-step rebuild point.  Each unique
@@ -120,12 +120,12 @@ class SensorEngine:
                 sensor_obj.update(self.uav_dict)
                 seen_instances.add(id(sensor_obj))
 
-        detection_dict: Dict[int, List] = {}
+        detection_dict: Dict[int, set] = {}
         for uav_id in self.uav_dict:
             detection_dict[uav_id] = self.sensor_obj_map[uav_id].get_uav_detection(uav_id)
         return detection_dict
 
-    def get_nmac(self) -> Dict[int, List]:
+    def get_nmac(self) -> Dict[int, set]:
         """Return NMAC UAV IDs per UAV.
 
         Precondition: get_detection_other_uavS() has been called this step
@@ -134,23 +134,23 @@ class SensorEngine:
         Returns:
             Dict[int, List[int]]: { uav_id -> [nmac_uav_id, ...] }
         """
-        nmac_dict: Dict[int, List] = {}
+        nmac_dict: Dict[int, set] = {}
         for uav_id in self.uav_dict:
             nmac_dict[uav_id] = self.sensor_obj_map[uav_id].get_nmac(uav_id)
         return nmac_dict
 
-    def get_collision_uavS(self) -> Dict[int, List]:
+    def get_collision_uavS(self) -> Dict[int, set]:
         """Return colliding UAV IDs per UAV.
 
         Returns:
             Dict[int, List[int]]: { uav_id -> [colliding_uav_id, ...] }
         """
-        collision_dict: Dict[int, List] = {}
+        collision_dict: Dict[int, set] = {}
         for uav_id in self.uav_dict:
             collision_dict[uav_id] = self.sensor_obj_map[uav_id].get_uav_collision(uav_id)
         return collision_dict
 
-    def get_detection_restricted_area(self) -> Dict[int, List]:
+    def get_detection_restricted_area(self) -> Dict[int, set]:
         """Return detected restricted area IDs per UAV.
 
         Returns empty lists for each UAV until RA geometry is wired in.
@@ -158,12 +158,12 @@ class SensorEngine:
         Returns:
             Dict[int, List[int]]: { uav_id -> [ra_id, ...] or [] }
         """
-        detection_dict: Dict[int, List] = {}
+        detection_dict: Dict[int, set] = {}
         for uav_id in self.uav_dict:
             detection_dict[uav_id] = self.sensor_obj_map[uav_id].get_ra_detection(uav_id)
         return detection_dict
 
-    def get_collision_restricted_area(self) -> Dict[int, List]:
+    def get_collision_restricted_area(self) -> Dict[int, set]:
         """Return collided restricted area IDs per UAV.
 
         Returns empty lists for each UAV until RA geometry is wired in.
@@ -171,7 +171,7 @@ class SensorEngine:
         Returns:
             Dict[int, List[int]]: { uav_id -> [ra_id, ...] or [] }
         """
-        collision_dict: Dict[int, List] = {}
+        collision_dict: Dict[int, set] = {}
         for uav_id in self.uav_dict:
             collision_dict[uav_id] = self.sensor_obj_map[uav_id].get_ra_collision(uav_id)
         return collision_dict

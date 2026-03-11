@@ -123,8 +123,11 @@ class ATC():
         Returns:
             None
         """
-        #print(f'Current UAV list: {self.uav_dict.values()}')
-        
+        # print(f'Current UAV list: {self.uav_dict.values()}')
+
+        if not ids_to_remove:
+            return None
+
         for uav_id in ids_to_remove:
             print(f'Removed UAV: {uav_id}')
             removed_uav = self.uav_dict.pop(uav_id)
@@ -290,14 +293,20 @@ class ATC():
 
             
 
-        
+        # First arrival at destination
+        if not self.check_landing_space_vp(uav_id):
+            self.holding_pattern_at_vertiport(uav_id)
+        else:
+            self._landing_procedure(uav_id)
+
         return None
     
     def holding_pattern_at_vertiport(self, uav_id):
         uav = self.uav_dict[uav_id]
         
-        # add uav_id to END_vertiport's landing queue
-        uav.end_vertiport.landing_queue.append(uav_id)
+        # add uav_id to END_vertiport's landing queue (dedup — only once)
+        if uav_id not in uav.end_vertiport.landing_queue:
+            uav.end_vertiport.landing_queue.append(uav_id)
         
         print(f'UAV id: {uav.id_}. UAV end vertiport: {uav.end_vertiport.id}, has uav_id:{uav.end_vertiport.uav_id_list}, dq uav_id: {uav.end_vertiport.get_landing_queue()}')
         # update attrs of UAV for HOLDING STATUS 
@@ -325,7 +334,7 @@ class ATC():
         landing_uav.operational = False 
         landing_uav.uav_in_flight = False 
         #
-        # Add UAV to Vertiport 
+        # Add UAV to Vertiport and mark as no longer in flight
         landing_vertiport = landing_uav.end_vertiport
         landing_vertiport.landing_queue.remove(landing_uav_id)
         landing_vertiport.uav_id_list.append(landing_uav_id)
@@ -395,7 +404,7 @@ class ATC():
 
         return None
     
-    def reassign_new_mission(self, uav_id:int):
+    def reassign_new_mission(self, uav_id: int):
         uav = self.uav_dict[uav_id]
         #! NO more adding to vertiport.uav_id_list 
         start_vertiport = uav.end_vertiport
@@ -408,8 +417,9 @@ class ATC():
 
         #self.assign_mission_start_end_vertiport(uav.id_, start_vertiport, end_vertiport)
 
-        
-
+        # Remove from vertiport's uav_id_list — UAV is being dispatched on a new mission
+        if uav_id in start_vertiport.uav_id_list:
+            start_vertiport.uav_id_list.remove(uav_id)
 
         return None
 

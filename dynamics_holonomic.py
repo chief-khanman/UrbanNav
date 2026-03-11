@@ -22,7 +22,9 @@ class HolonomicDynamics(Dynamics):
     def __init__(self) -> None:
         super().__init__()
 
-
+    def update(self, uav_id: str, action) -> None:
+        """Not used by DynamicsEngine; step() is the primary interface."""
+        return None
 
     def step(self, action, uav: UAV | UAV_template) -> None:
         """Apply world-frame acceleration (ax, ay) to update the UAV's state.

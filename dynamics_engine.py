@@ -88,10 +88,12 @@ class DynamicsEngine:
 
         # Fan out: map every uav_id to its shared Dynamics instance.
         # UAVs sharing the same dynamics type share the same object.
+        # Also stamp dt onto each UAV so controllers can use uav.dt for PD terms.
         for dyn_name, uav_id_list in self.dynamics_uav_map.items():
             dyn_obj = type_to_instance[dyn_name]
             for uav_id in uav_id_list:       # uav_id is int (set by atc._set_uav)
                 self.dynamics_obj_map[uav_id] = dyn_obj
+                self.uav_dict[uav_id].dt = self.dt
 
 
     def step(self, actions_dict):

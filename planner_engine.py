@@ -87,13 +87,32 @@ class PlannerEngine:
         Each planner's get_plan() is called with the UAV's current_position so that
         waypoint-advancement logic runs correctly at every step.
 
+        Also detects mission reassignment: if the planner's stored destination no longer
+        matches the UAV's current mission_end_point, the planner is reset with fresh
+        waypoints so the UAV navigates to its new goal instead of stalling at its old one.
+
         Returns:
             plan_dict: { uav_id(int) -> List[Point] } current plan for each UAV.
         """
         for uav_id, plan_model in self.plan_obj_map.items():
-            if uav_id in self.uav_dict:
-                uav = self.uav_dict[uav_id]
-                self.plan_dict[uav_id] = plan_model.get_plan(uav.current_position)
+            if uav_id not in self.uav_dict:   # UAV may have been removed by collision
+                continue
+            uav = self.uav_dict[uav_id]
+
+            # Detect mission reassignment: planner's stored goal is stale.
+            # After reassign_new_mission(), uav.mission_end_point changes but the
+            # planner still holds the old waypoints (and current_idx may be past the
+            # end), causing it to return the old destination as target_pos.  That puts
+            # target at the UAV's current position → distance=0 → accel_cmd=0 → speed
+            # stays 0 forever.  Reset the planner whenever the goal diverges.
+            try:
+                if plan_model.waypoints[-1] != uav.mission_end_point:
+                    plan_model.waypoints = [uav.mission_start_point, uav.mission_end_point]
+                    plan_model.current_idx = 0
+            except AttributeError:
+                pass  # UAV not yet fully assigned; skip this step
+
+            self.plan_dict[uav_id] = plan_model.get_plan(uav.current_position)
         return self.plan_dict
 
     def set_plans(self, *args, **kwargs):

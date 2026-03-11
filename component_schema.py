@@ -49,6 +49,38 @@ class UAMSimulatorConfig(BaseModel):
     seed: int
 
 
+class LoggingConfig(BaseModel):
+    """Controls whether episode metrics are collected and where they are saved."""
+    enabled: bool = True
+    log_dir: str = 'logs'
+
+
+class RenderingConfig(BaseModel):
+    """Controls 2D rendering of simulation episodes.
+
+    mode:
+        'realtime'  — draw each step interactively (requires a display / GUI backend).
+        'offline'   — collect frames during the run and save an animation at the end.
+        'both'      — do both simultaneously.
+    frame_skip:
+        Render every (frame_skip + 1) steps.  0 = every step, 9 = every 10th step.
+        Increase to keep animation file sizes manageable for long episodes.
+    """
+    enabled: bool = False
+    mode: str = 'offline'
+    output_dir: str = 'renders'
+    output_filename: str = 'episode'
+    realtime_sleep: float = 0.01
+    frame_skip: int = 4
+
+    @field_validator('mode')
+    @classmethod
+    def mode_must_be_valid(cls, v: str) -> str:
+        if v not in ('realtime', 'offline', 'both'):
+            raise ValueError(f"mode must be 'realtime', 'offline', or 'both', got '{v}'")
+        return v
+
+
 class VertiportConfig(BaseModel):
     number_of_landing_pad: int
 
@@ -87,27 +119,27 @@ UAV_TYPE_REGISTRY.update({
         max_velocity=15.0,
     ),
     'HEAVY': UAVTypeConfig(
-        radius=1.0,
-        nmac_radius=2.0,
-        detection_radius=15.0,
+        radius=34.0,
+        nmac_radius=400.0,
+        detection_radius=700.0,
         max_speed=7.0,
         max_acceleration=1.5,
         max_heading_change=math.pi,
         max_velocity=10.0,
     ),
     'LEARNING': UAVTypeConfig(
-        radius=0.5,
-        nmac_radius=1.0,
-        detection_radius=10.0,
+        radius=17.0,
+        nmac_radius=200.0,
+        detection_radius=500.0,
         max_speed=10.0,
         max_acceleration=3.0,
         max_heading_change=math.pi,
         max_velocity=15.0,
     ),
     'ORCA': UAVTypeConfig(
-        radius=0.5,
-        nmac_radius=1.0,
-        detection_radius=10.0,
+        radius=17.0,
+        nmac_radius=200.0,
+        detection_radius=500.0,
         max_speed=10.0,
         max_acceleration=3.0,
         max_heading_change=math.pi,
@@ -191,6 +223,8 @@ class UAMConfig(BaseModel):
     vertiport: VertiportConfig
     airspace: AirspaceConfig
     fleet_composition: List[UAVFleetInstanceConfig]
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    rendering: RenderingConfig = Field(default_factory=RenderingConfig)
 
     @classmethod
     def load_from_yaml(cls, path: str) -> 'UAMConfig':

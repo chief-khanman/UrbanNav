@@ -52,7 +52,7 @@ class Sensor(ABC):
         self._ra_geo_series = ra_geo_series
 
 
-    def get_sensor_data(self, uav_id: int, sensor_active_status: bool = True) -> Dict[str, List]:
+    def get_sensor_data(self, uav_id: int, sensor_active_status: bool = True) -> Dict[str, set]:
         '''Combination of uav detection(List of Dict) and ra detection(List of Dict)'''
 
         if sensor_active_status:
@@ -62,11 +62,11 @@ class Sensor(ABC):
             collision_uav_id_list = self.get_uav_collision(uav_id)
             collision_ra_id_list = self.get_ra_collision(uav_id)
         else:
-            detect_uav_id_list = []
-            detect_ra_id_list = []
-            nmac_uav_id_list = []
-            collision_uav_id_list = []
-            collision_ra_id_list = []
+            detect_uav_id_list = set()
+            detect_ra_id_list = set()
+            nmac_uav_id_list = set()
+            collision_uav_id_list = set()
+            collision_ra_id_list = set()
 
         sensor_data_packet = {
                             'detect_uav': detect_uav_id_list,
@@ -81,24 +81,24 @@ class Sensor(ABC):
 
     # UAV
     @abstractmethod
-    def get_uav_detection(self, uav_id: int, *args) -> List[int]:
+    def get_uav_detection(self, uav_id: int, *args) -> set[int]:
         # RUN broad phase collision detection
         pass
 
     @abstractmethod
-    def get_nmac(self, uav_id: int) -> List[int]:
+    def get_nmac(self, uav_id: int) -> set[int]:
         '''Collect the time step and UAVs with who there was an NMAC'''
         pass
 
     @abstractmethod
-    def get_uav_collision(self, uav_id: int) -> List[int]:
+    def get_uav_collision(self, uav_id: int) -> set[int]:
         '''returns a bool if there is a collision along with UAV id'''
         pass
 
 
     # Restricted Airspace (ra)
-    def get_ra_detection(self, uav_id: int) -> List[int]:
-        return []
+    def get_ra_detection(self, uav_id: int) -> set[int]:
+        return set()
 
-    def get_ra_collision(self, uav_id: int) -> List[int]:
-        return []
+    def get_ra_collision(self, uav_id: int) -> set[int]:
+        return set()
