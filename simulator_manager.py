@@ -315,7 +315,8 @@ class SimulatorManager:
         nmac_dict = self.sensor_module.get_nmac()
         collision_dict_restricted_area = self.sensor_module.get_collision_restricted_area()
         collision_dict_uavS = self.sensor_module.get_collision_uavS()
-        print(f'Collision ids: {collision_dict_uavS}')
+        
+        #print(f'Collision ids: {collision_dict_uavS}')
         ### REMOVE UAV ###
         # remove UAVs that have collided
         #! check vertiports 

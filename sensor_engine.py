@@ -137,6 +137,9 @@ class SensorEngine:
         nmac_dict: Dict[int, set] = {}
         for uav_id in self.uav_dict:
             nmac_dict[uav_id] = self.sensor_obj_map[uav_id].get_nmac(uav_id)
+            ### delete after debugging 
+            #print('nmac dict: ', nmac_dict)
+            ### delete after debugging 
         return nmac_dict
 
     def get_collision_uavS(self) -> Dict[int, set]:

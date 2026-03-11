@@ -42,7 +42,7 @@ class PartialSensor(Sensor):
             max_uavs: Pre-allocated capacity for internal arrays.
         """
         super().__init__()
-        self._spacing: float = spacing
+        self._spacing = spacing
         self._max_uavs: int = max_uavs
         self._spatial_hash: Optional[SpatialHash] = SpatialHash(spacing, max_uavs) if spacing is not None else None
         self._uav_dict: Dict[int, UAV] = {}
