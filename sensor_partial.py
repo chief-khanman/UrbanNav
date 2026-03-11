@@ -32,7 +32,7 @@ class PartialSensor(Sensor):
     shared utility module.
     """
 
-    def __init__(self, spacing: float = None, max_uavs: int = 200) -> None:
+    def __init__(self, spacing: float|None = None, max_uavs: int = 200) -> None:
         """
         Args:
             spacing: Grid cell size in metres.  Should be >= the largest
@@ -69,7 +69,7 @@ class PartialSensor(Sensor):
             return
 
         # Lazily compute spacing from the fleet's largest detection radius
-        if not self._spacing:
+        if self._spacing is None:
             self._spacing = max(uav.detection_radius for uav in uav_dict.values())
 
         # Re-allocate if fleet has grown beyond initial max_uavs
@@ -84,7 +84,7 @@ class PartialSensor(Sensor):
     # Abstract method implementations
     # ------------------------------------------------------------------
 
-    def get_uav_detection(self, uav_id: int, *args) -> List[int]:
+    def get_uav_detection(self, uav_id: int, *args) -> set[int]:
         """Return IDs of UAVs within this UAV's detection_radius.
 
         Broad phase: spatial hash query with detection_radius bounding box.
@@ -101,7 +101,7 @@ class PartialSensor(Sensor):
             (uav.px, uav.py, uav.pz), uav.detection_radius
         )
 
-        detected: List[int] = []
+        detected: set[int] = set()
         for candidate_id in candidates:
             if candidate_id == uav_id:
                 continue
@@ -111,10 +111,10 @@ class PartialSensor(Sensor):
             dist = _euclidean_3d(uav.px, uav.py, uav.pz,
                                   other.px, other.py, other.pz)
             if dist <= uav.detection_radius:
-                detected.append(candidate_id)
+                detected.add(candidate_id)
         return detected
 
-    def get_nmac(self, uav_id: int) -> List[int]:
+    def get_nmac(self, uav_id: int) -> set[int]:
         """Return IDs of UAVs within this UAV's nmac_radius.
 
         Chains from get_uav_detection — only detected UAVs are checked,
@@ -129,16 +129,16 @@ class PartialSensor(Sensor):
         uav = self._uav_dict[uav_id]
         detected_ids = self.get_uav_detection(uav_id)
 
-        nmac: List[int] = []
+        nmac: set[int] = set() 
         for other_id in detected_ids:
             other = self._uav_dict[other_id]
             dist = _euclidean_3d(uav.px, uav.py, uav.pz,
                                   other.px, other.py, other.pz)
             if dist <= uav.nmac_radius:
-                nmac.append(other_id)
+                nmac.add(other_id)
         return nmac
 
-    def get_uav_collision(self, uav_id: int) -> List[int]:
+    def get_uav_collision(self, uav_id: int) -> set[int]:
         """Return IDs of UAVs physically colliding with this UAV.
 
         Collision threshold is the sum of both UAVs' body radii — correct
@@ -153,33 +153,33 @@ class PartialSensor(Sensor):
         uav = self._uav_dict[uav_id]
         nmac_ids = self.get_nmac(uav_id)
 
-        collisions: List[int] = []
+        collisions: set[int] = set()
         for other_id in nmac_ids:
             other = self._uav_dict[other_id]
             dist = _euclidean_3d(uav.px, uav.py, uav.pz,
                                   other.px, other.py, other.pz)
             if dist <= (uav.radius + other.radius):
-                collisions.append(other_id)
+                collisions.add(other_id)
         return collisions
 
     # ------------------------------------------------------------------
     # Restricted airspace (stubs — populated when RA geometry is wired)
     # ------------------------------------------------------------------
 
-    def get_ra_detection(self, uav_id: int) -> List[int]:
+    def get_ra_detection(self, uav_id: int) -> set[int]:
         """Return IDs of restricted areas within detection range.
         Returns [] until set_restricted_area_data() has been called.
         """
         if self._ra_geo_series is None:
-            return []
+            return set()
         # TODO: implement shapely intersection check against ra_geo_series
-        return []
+        return set()
 
-    def get_ra_collision(self, uav_id: int) -> List[int]:
+    def get_ra_collision(self, uav_id: int) -> set[int]:
         """Return IDs of restricted areas the UAV's body overlaps.
         Returns [] until set_restricted_area_data() has been called.
         """
         if self._ra_geo_series is None:
-            return []
+            return set()
         # TODO: implement shapely intersection check against ra_geo_series
-        return []
+        return set() 
