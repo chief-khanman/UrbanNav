@@ -360,7 +360,7 @@ class Airspace:
         if self.airspace_restricted_area_tag_list:
             sample_space = self.location_utm_gdf['geometry'].iloc[0]
             for tag_value in self.location_tags.keys():
-                sample_space = shapely.difference(sample_space, self.location_utm_buffer[tag_value].unary_union)
+                sample_space = shapely.difference(sample_space, self.location_utm_buffer[tag_value].union_all())
             sample_space_gdf = GeoSeries(sample_space)
         else: 
             sample_space = self.location_utm_gdf
