@@ -89,8 +89,9 @@ class SensorEngine:
             # Inject restricted area geometry if available
             if self.airspace is not None:
                 ra_data = getattr(self.airspace, 'restricted_airspace_geo_series', None)
+                ra_buf  = getattr(self.airspace, 'restricted_airspace_buffer_geo_series', None)
                 if ra_data is not None:
-                    instance.set_restricted_area_data(ra_data)
+                    instance.set_restricted_area_data(ra_data, ra_buf)
             type_to_instance[sensor_name] = instance
 
         # Fan out: map every uav_id to its shared Sensor instance

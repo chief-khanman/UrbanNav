@@ -1,4 +1,5 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+from shapely.geometry import Point
 from sensor_template import Sensor
 from sensor_spatial_hash import SpatialHash, _euclidean_3d
 from uav import UAV
@@ -47,6 +48,45 @@ class PartialSensor(Sensor):
         self._spatial_hash: Optional[SpatialHash] = SpatialHash(spacing, max_uavs) if spacing is not None else None
         self._uav_dict: Dict[int, UAV] = {}
 
+        # Restricted airspace spatial hash (built once — RA is static)
+        self._ra_spatial_hash: Optional[SpatialHash] = None
+        self._ra_hash_built: bool = False
+        self._ra_positions: Dict[int, Tuple[float, float, float]] = {}  # int_id -> (cx, cy, 0.0)
+        self._ra_polygons: dict = {}          # int_id -> shapely Polygon (actual boundary)
+        self._ra_polygon_buffers: dict = {}   # int_id -> shapely Polygon (buffered detection zone)
+
+    # ------------------------------------------------------------------
+    # RA data injection (called once by SensorEngine at startup)
+    # ------------------------------------------------------------------
+
+    def set_restricted_area_data(self, ra_geo_series, ra_buffer_geo_series=None) -> None:
+        """Pre-process RA geometry into int-keyed dicts for fast per-step lookup.
+
+        Overrides Sensor.set_restricted_area_data().  Enumerates the RA
+        GeoDataFrame rows and builds:
+          _ra_positions        — centroid (x, y, 0) for spatial hash build
+          _ra_polygons         — actual polygon for collision narrow phase
+          _ra_polygon_buffers  — buffered polygon for detection narrow phase
+
+        Args:
+            ra_geo_series: GeoDataFrame of RA polygons from airspace.
+            ra_buffer_geo_series: GeoSeries of buffered RA polygons (detection zone).
+        """
+        super().set_restricted_area_data(ra_geo_series, ra_buffer_geo_series)
+        if ra_geo_series is None:
+            return
+
+        ra_gdf = ra_geo_series.reset_index(drop=True)
+        ra_buf  = ra_buffer_geo_series.reset_index(drop=True) if ra_buffer_geo_series is not None else None
+
+        for int_id, row in ra_gdf.iterrows():
+            poly = row.geometry
+            centroid = poly.centroid
+            self._ra_positions[int_id]      = (centroid.x, centroid.y, 0.0)
+            self._ra_polygons[int_id]       = poly
+            if ra_buf is not None:
+                self._ra_polygon_buffers[int_id] = ra_buf.iloc[int_id]
+
     # ------------------------------------------------------------------
     # Per-step rebuild (called by SensorEngine before any get_* queries)
     # ------------------------------------------------------------------
@@ -79,6 +119,13 @@ class PartialSensor(Sensor):
             self._spatial_hash = SpatialHash(self._spacing, self._max_uavs)
 
         self._spatial_hash.build(uav_dict)
+
+        # Build RA spatial hash once (restricted airspace is static)
+        if not self._ra_hash_built and self._ra_positions and self._spacing:
+            num_ra = len(self._ra_positions)
+            self._ra_spatial_hash = SpatialHash(self._spacing, max(num_ra, 1))
+            self._ra_spatial_hash.build_from_positions(self._ra_positions)
+            self._ra_hash_built = True
 
     # ------------------------------------------------------------------
     # Abstract method implementations
@@ -170,26 +217,75 @@ class PartialSensor(Sensor):
         return collisions
 
     # ------------------------------------------------------------------
-    # Restricted airspace (stubs — populated when RA geometry is wired)
+    # Restricted airspace detection and collision
     # ------------------------------------------------------------------
 
     def get_ra_detection(self, uav_id: int) -> set[int]:
-        """Return IDs of restricted areas within detection range.
-        Returns [] until set_restricted_area_data() has been called.
+        """Return integer IDs of restricted areas whose buffer overlaps this UAV's detection zone.
+
+        Broad phase: RA spatial hash query at (uav.px, uav.py, 0) with detection_radius.
+        Narrow phase: Shapely 2D — uav detection circle intersects buffered RA polygon.
+        Sensor operational guard mirrors get_uav_detection behaviour.
+
+        Args:
+            uav_id: ID of the querying UAV.
+
+        Returns:
+            Set of integer RA IDs (subset of pre-processed _ra_polygon_buffers).
         """
-        if self._ra_geo_series is None:
+        if self._ra_geo_series is None or self._ra_spatial_hash is None:
             return set()
-        # TODO: implement shapely intersection check against ra_geo_series
-        return set()
+
+        uav = self._uav_dict[uav_id]
+
+        if not uav.get_sensor_operational():
+            return set()
+
+        # Broad phase: query RA hash in 2D (z=0 for ground-level RA centroids)
+        candidates = self._ra_spatial_hash.query(
+            (uav.px, uav.py, 0.0), uav.detection_radius
+        )
+
+        uav_detection_circle = Point(uav.px, uav.py).buffer(uav.detection_radius)
+
+        detected_ra: set[int] = set()
+        for ra_id in candidates:
+            ra_buf_poly = self._ra_polygon_buffers.get(ra_id)
+            if ra_buf_poly is None:
+                continue
+            if uav_detection_circle.intersects(ra_buf_poly):
+                detected_ra.add(ra_id)
+
+        return detected_ra
 
     def get_ra_collision(self, uav_id: int) -> set[int]:
-        """Return IDs of restricted areas the UAV's body overlaps.
-        Returns [] until set_restricted_area_data() has been called.
+        """Return integer IDs of restricted areas whose boundary overlaps this UAV's body.
+
+        Chains from get_ra_detection — only detected RAs are checked.
+        Narrow phase: Shapely 2D — uav body circle intersects actual RA polygon.
+
+        Args:
+            uav_id: ID of the querying UAV.
+
+        Returns:
+            Set of integer RA IDs (subset of get_ra_detection result).
         """
-        if self._ra_geo_series is None:
+        if self._ra_geo_series is None or self._ra_spatial_hash is None:
             return set()
-        # TODO: implement shapely intersection check against ra_geo_series
-        return set() 
+
+        detected_ra_ids = self.get_ra_detection(uav_id)
+        uav = self._uav_dict[uav_id]
+        uav_body_circle = Point(uav.px, uav.py).buffer(uav.radius)
+
+        collisions_ra: set[int] = set()
+        for ra_id in detected_ra_ids:
+            ra_poly = self._ra_polygons.get(ra_id)
+            if ra_poly is None:
+                continue
+            if uav_body_circle.intersects(ra_poly):
+                collisions_ra.add(ra_id)
+
+        return collisions_ra
 
     def _turn_off_landing_sensor(self, uav_id):
         uav = self._uav_dict[uav_id]

@@ -31,6 +31,7 @@ class Sensor(ABC):
         Parameters are sensor-type-specific — see subclass docstrings.
         """
         self._ra_geo_series = None
+        self._ra_buffer_geo_series = None
         return None
 
 
@@ -42,14 +43,16 @@ class Sensor(ABC):
         """
         pass
 
-    def set_restricted_area_data(self, ra_geo_series) -> None:
+    def set_restricted_area_data(self, ra_geo_series, ra_buffer_geo_series=None) -> None:
         """Inject restricted area geometry for RA detection and collision checks.
         Called by SensorEngine.register_uav_sensors() after instantiation.
 
         Args:
-            ra_geo_series: GeoSeries of RA polygons from airspace.
+            ra_geo_series: GeoDataFrame of RA polygons from airspace.
+            ra_buffer_geo_series: GeoSeries of buffered RA polygons (detection zone).
         """
         self._ra_geo_series = ra_geo_series
+        self._ra_buffer_geo_series = ra_buffer_geo_series
 
 
     def get_sensor_data(self, uav_id: int, sensor_active_status: bool = True) -> Dict[str, set]:

@@ -26,7 +26,7 @@ vertiport:
 airspace:
   location_name: 'Austin, Texas, USA'
   number_of_vertiports: 3
-  vertiport_tag_list: [['building', 'yes']]
+  vertiport_tag_list: [['building', 'commercial']]
   airspace_restricted_area_tag_list: [['building', 'office']]
 
 # controller must be a key in VALID_CONTROLLERS   (component_schema.py)

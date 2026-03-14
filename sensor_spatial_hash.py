@@ -65,12 +65,25 @@ class SpatialHash:
         Args:
             uav_dict: Mapping of uav_id (int) -> UAV instance.
         """
+        positions = {uid: (uav.px, uav.py, uav.pz) for uid, uav in uav_dict.items()}
+        self.build_from_positions(positions)
+
+    def build_from_positions(self, positions: Dict[int, Tuple[float, float, float]]) -> None:
+        """Rebuild the hash table from a dict of (x, y, z) positions.
+
+        Generic alternative to build() — accepts any int-keyed position dict,
+        not just UAV objects.  Used for static objects such as restricted
+        airspace polygon centroids.
+
+        Args:
+            positions: Mapping of object_id (int) -> (x, y, z) tuple.
+        """
         self.cell_start.fill(0)
         self.cell_entries.fill(0)
 
-        # Pass 1a: count UAVs per hash bucket
-        for uav in uav_dict.values():
-            xi, yi, zi = self._int_coords(uav.px, uav.py, uav.pz)
+        # Pass 1a: count entries per hash bucket
+        for (x, y, z) in positions.values():
+            xi, yi, zi = self._int_coords(x, y, z)
             h = self._hash_function(xi, yi, zi)
             self.cell_start[h] += 1
 
@@ -82,13 +95,13 @@ class SpatialHash:
             self.cell_start[i] = total
         self.cell_start[self.table_size] = total
 
-        # Pass 2: place UAV IDs into cell_entries, decrement start pointer
+        # Pass 2: place object IDs into cell_entries, decrement start pointer
         # After this pass cell_start[h] becomes the *start* (inclusive) index
-        for uav_id, uav in uav_dict.items():
-            xi, yi, zi = self._int_coords(uav.px, uav.py, uav.pz)
+        for obj_id, (x, y, z) in positions.items():
+            xi, yi, zi = self._int_coords(x, y, z)
             h = self._hash_function(xi, yi, zi)
             self.cell_start[h] -= 1
-            self.cell_entries[self.cell_start[h]] = uav_id
+            self.cell_entries[self.cell_start[h]] = obj_id
 
     def query(self, pos: Tuple[float, float, float], max_dist: float) -> List[int]:
         """Return candidate UAV IDs whose grid cell overlaps the query region.
