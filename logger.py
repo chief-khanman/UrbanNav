@@ -120,7 +120,7 @@ class Logger:
             'start_step':        first['step'],
             'num_uavs_at_start': first['num_active_uavs'],
             'initial_uav_positions': {
-                uid: {'x': snap['x'], 'y': snap['y']}
+                uid: {'x': snap['x'], 'y': snap['y'], 'z': snap['z']} #snap aka snapshot 
                 for uid, snap in first['uavs'].items()
             },
         }
@@ -155,8 +155,12 @@ class Logger:
                     uid: {
                         'x':       snap['x'],
                         'y':       snap['y'],
+                        'z':       snap['z'],
                         'heading': snap['heading'],
                         'speed':   snap['speed'],
+                        'vx':      snap['vx'],
+                        'vy':      snap['vy'],
+                        'vz':      snap['vz'], 
                     }
                     for uid, snap in step['uavs'].items()
                 },

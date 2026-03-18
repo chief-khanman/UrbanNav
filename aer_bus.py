@@ -8,13 +8,15 @@ from component_schema import VALID_CONTROLLERS
 from controller_template import Controller
 from controller_pid_point_mass import PIDPointMassController
 from controller_holonomic import HolonomicPIDController
+from controller_cascade_PID_six_dof import CascadedPIDSixDOFController
 
 
 # Maps controller name strings (from VALID_CONTROLLERS / ATC.controller_map keys)
 # to their concrete Controller subclass. Add new inline controllers here.
 CONTROLLER_CLASS_MAP: Dict[str, type] = {
-    'PIDPointMassController': PIDPointMassController,
-    'PIDHolonomicController': HolonomicPIDController
+    'PIDPointMassController':    PIDPointMassController,
+    'PIDHolonomicController':    HolonomicPIDController,
+    'CascadedPIDSixDOFController': CascadedPIDSixDOFController,
 }
 
 # Controller names that signal "RL training mode" — no internal action is generated;

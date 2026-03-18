@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -50,24 +51,33 @@ class MetricsCollector:
         for uav_id, uav in uav_dict.items():
             pos = uav.current_position
             
-            #TODO: remove try/except block 
+            #TODO: remove try/except block
             try:
                 #TODO: add this as an attr, that's updated during
                 # simulator_manager.step() -> dynamics_engine.step() ...
                 # ... -> dynamics[uav_instance].step() <update dist_2_goal> HERE
-                dist_to_goal = pos.distance(uav.mission_end_point)
+                end_pt  = uav.mission_end_point
+                end_z   = end_pt.z if end_pt.has_z else 0.0
+                uav_z   = getattr(uav, 'pz', 0.0)
+                dist_to_goal = math.sqrt(
+                    (pos.x - end_pt.x) ** 2 +
+                    (pos.y - end_pt.y) ** 2 +
+                    (uav_z - end_z)    ** 2
+                )
             except AttributeError:
                 dist_to_goal = None
 
             uav_snapshots[uav_id] = {
                 'x':               pos.x,
                 'y':               pos.y,
+                'z':               getattr(uav, 'pz', 0.0),
                 'speed':           getattr(uav, 'current_speed', 0.0),
                 'heading':         getattr(uav, 'current_heading', 0.0),
                 'vx':              getattr(uav, 'vx', 0.0),
                 'vy':              getattr(uav, 'vy', 0.0),
-                #TODO: fix logic for incrementing nmac_count - sensor[uav_instance].get_nmac() -> increment uav.nmac_count 
-                'nmac_count':      getattr(uav, 'nmac_count', 0), #! sensor does not increment NMAC count 
+                'vz':              getattr(uav, 'vz', 0.0),
+                #TODO: fix logic for incrementing nmac_count - sensor[uav_instance].get_nmac() -> increment uav.nmac_count
+                'nmac_count':      getattr(uav, 'nmac_count', 0), #! sensor does not increment NMAC count
                 'mission_complete': getattr(uav, 'current_mission_complete_status', False),
                 'dist_to_goal':    dist_to_goal,
             }

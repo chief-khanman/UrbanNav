@@ -22,7 +22,7 @@ class UAMSimulator:
         self.simulator_manager = SimulatorManager(self.config)
 
         ##### Rendering #####
-        self.renderer = Renderer(self.config.rendering)
+        self.renderer = Renderer(self.config.rendering, self.config.simulator.mode)
 
         ##### Metrics #####
         self.logger = Logger(self.config.logging, full_config=self.config)
@@ -35,6 +35,7 @@ class UAMSimulator:
         self.renderer.reset(self.simulator_manager.airspace)
         self.logger.reset()
         self.logger.log_step()
+        
 
 
     def step(self, commands: UAVCommandBundle):
@@ -46,7 +47,7 @@ class UAMSimulator:
             self.simulator_manager.atc.uav_dict,
             self.simulator_manager._state.currentstep,
         )
-        return None
+        return collisions
 
     def render(self) -> None:
         """Save offline animation for the current episode (no-op for realtime-only mode)."""

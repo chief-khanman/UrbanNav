@@ -1,17 +1,17 @@
 # UAM Simulator Configuration
 # component_schema.py structure has to respect this config.yaml
 
-#### CONFIG ####
+#### SIMULATOR CONFIG ####
 simulator:
   dt: 1.0
-  total_timestep: 3000   # small for quick deployment runs
-  mode: '2D'            # or '3D'
+  total_timestep: 5000   # small for quick deployment runs
+  mode: '3D'            # or '3D'
   seed: 123
-
+#### LOGGING CONFIG ####
 logging:
   enabled: true
   log_dir: 'logs'       # episode data saved under logs/episode_<id>_<timestamp>/
-
+#### RENDERING CONFIG ####
 rendering:
   enabled: true
   mode: 'offline'       # 'realtime', 'offline', or 'both'
@@ -19,13 +19,13 @@ rendering:
   output_filename: 'episode'
   realtime_sleep: 0.01  # seconds to pause between real-time frames
   frame_skip: 4         # render every (frame_skip+1) steps; 0=every step, 4=every 5th
-
+#### VERTIPORT CONFIG ####
 vertiport:
   number_of_landing_pad: 3
-
+#### AIRSPACE CONFIG ####
 airspace:
   location_name: 'Austin, Texas, USA'
-  number_of_vertiports: 3
+  number_of_vertiports: 20
   vertiport_tag_list: [['building', 'commercial']]
   airspace_restricted_area_tag_list: [['building', 'office']]
 
@@ -33,12 +33,22 @@ airspace:
 # dynamics  must be a key in VALID_DYNAMICS        (component_schema.py)
 # planner   must be a key in VALID_PLANNERS        (component_schema.py)
 # sensor    must be a key in VALID_SENSORS         (component_schema.py)
+
 fleet_composition:
+#### UAV FLEET INSTANCE CONFIG ####
   - type_name: STANDARD
-    count: 3
-    dynamics: PointMass
+    count: 5
+    dynamics: PointMass 
     controller: PIDPointMassController
     sensor: PartialSensor
     planner: PointMass-PID
+  - type_name: LEARNING
+    count: 1
+    dynamics: PointMass
+    controller: 
+    sensor: PartialSensor
+    planner: 
+    mode: training # OR testing 
+
 
 #### CONFIG ####

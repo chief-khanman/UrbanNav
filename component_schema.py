@@ -19,11 +19,11 @@ import json
 
 # Reserved type name for RL-training UAVs — controller is assigned at training time.
 RESERVED_TYPE_LEARNING = 'LEARNING'
-
+RESERVER_TYPE_MODE: set[str] = {'TRAIN', 'TEST'}
 # Valid string identifiers for each component type.
 # Dynamics, controller, sensor classes are wired separately once those modules are ready.
 VALID_DYNAMICS: set[str] = {'PointMass', 'SixDOF', 'TwoDVector-Holonomic', 'ORCA'}
-VALID_CONTROLLERS: set[str] = {'PIDPointMassController', 'PIDHolonomicController', 'LQR', 'MARL', 'ORCA', 'Static', 'RL'}
+VALID_CONTROLLERS: set[str] = {'PIDPointMassController', 'PIDHolonomicController', 'CascadedPIDSixDOFController', 'LQR', 'MARL', 'ORCA', 'Static', 'RL'}
 VALID_SENSORS: set[str] = {'PartialSensor', 'GlobalSensor', 'MapSensor'}
 VALID_PLANNERS: set[str] = {'PointMass-PID', 'Holonomic-PID', 'PointMass-RL', 'SixDOF-PID', 'SixDOF-LQR', 'N/A'}
 
@@ -158,6 +158,7 @@ class UAVFleetInstanceConfig(BaseModel):
     controller: str  # None valid only for LEARNING type
     sensor: str             # must be a key in VALID_SENSORS
     planner: str            # must be a key in VALID_PLANNERS
+    mode: str
 
     @field_validator('type_name')
     @classmethod
@@ -212,7 +213,14 @@ class UAVFleetInstanceConfig(BaseModel):
                 f"controller must be set for non-LEARNING type '{self.type_name}'"
             )
         return self
-
+    
+    @model_validator(mode='after')
+    def learning_type_mode_check(self) -> 'UAVFleetInstanceConfig':
+        """NON LEARNING UAVs may omit mode (RL policy requires mode to determine train or test)"""
+        if self.type_name == RESERVED_TYPE_LEARNING and self.mode not in RESERVER_TYPE_MODE:
+            raise ValueError(
+                f'mode must be set for LEARNING type from: {RESERVER_TYPE_MODE}, current mode: {self.mode}'
+            )
 
 class UAMConfig(BaseModel):
     """Root config object — mirrors the top-level keys of sample_config.yaml.

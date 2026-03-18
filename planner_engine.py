@@ -7,6 +7,7 @@ from uav import UAV
 from component_schema import UAMConfig, VALID_PLANNERS
 from plan_point_mass_pid import PointMassPIDPlanner
 from plan_holonomic import HolonomicPlanner
+from plan_six_dof_pid import SixDOFPIDPlanner
 
 
 # Maps VALID_PLANNERS string names → PlannerTemplate subclasses.
@@ -16,8 +17,8 @@ from plan_holonomic import HolonomicPlanner
 PLANNER_CLASS_MAP: Dict[str, type] = {
     'PointMass-PID': PointMassPIDPlanner,
     'Holonomic-PID': HolonomicPlanner,
+    'SixDOF-PID':    SixDOFPIDPlanner,
     # 'PointMass-RL': PointMassRLPlanner,   # TODO: add once implemented
-    # 'SixDOF-PID':   SixDOFPIDPlanner,     # TODO: add once implemented
 }
 
 
@@ -77,6 +78,8 @@ class PlannerEngine:
                 uav = self.uav_dict[uav_id]
                 waypoints = [uav.start_vertiport.location, uav.end_vertiport.location]
                 instance = PLANNER_CLASS_MAP[plan_name](waypoints=waypoints)
+                if hasattr(instance, 'dt'):
+                    instance.dt = self.dt   # sync simulator dt for time-aware planners
                 self.plan_obj_map[uav_id] = instance
 
     #TODO: get_plans() will need to be updated - return should not be List[Points], return should be List[Tuple[Point|float]]
