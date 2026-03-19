@@ -4,7 +4,7 @@ import numpy as np
 from simulator_manager import SimulatorManager
 from renderer import Renderer
 from logger import Logger
-from component_schema import UAMConfig, ActionType, UAVCommand, UAVCommandBundle, SimulatorState
+from component_schema import UAMConfig, ActionType, UAVCommand, UAVCommandBundle, SimulatorState, RESERVED_TYPE_LEARNING
 
 
 class UAMSimulator:

@@ -1,6 +1,6 @@
 import datetime
 import random
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Tuple, Any, Optional
 from airspace import Airspace
 from atc import ATC
 from component_schema import UAMConfig
@@ -9,7 +9,7 @@ from planner_engine import PlannerEngine
 from aer_bus import AerBus
 from dynamics_engine import DynamicsEngine
 from component_schema import UAVCommandBundle, ActionType, SimulatorState, build_fleet
-
+from component_schema import RESERVED_TYPE_LEARNING
 
 class SimulatorManager:
     '''Primary class that orchestrates and manages assets/data_classes,
@@ -329,7 +329,15 @@ class SimulatorManager:
         
 
 
-
+    def get_learning_uav_id(self) -> Optional[int]:
+        """
+        Return the integer id of the first LEARNING UAV in atc.uav_dict.
+        Returns None if no LEARNING UAV is present (e.g. before the first reset).
+        """
+        for uid, uav in self.simulator_manager.atc.uav_dict.items():
+            if getattr(uav, 'type_name', None) == RESERVED_TYPE_LEARNING:
+                return uid
+        return None
 
 
 

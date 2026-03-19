@@ -45,10 +45,10 @@ fleet_composition:
   - type_name: LEARNING
     count: 1
     dynamics: PointMass
-    controller: 
+    controller: RL 
     sensor: PartialSensor
-    planner: 
-    mode: training # OR testing 
+    planner: PointMass-PID
+    mode: TRAIN    # OR TEST
 
 
 #### CONFIG ####

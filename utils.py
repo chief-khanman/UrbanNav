@@ -2,6 +2,7 @@ import geopandas as gpd
 from matplotlib.axes._axes import Axes
 from uav import UAV_template
 import numpy as np
+from shapely import Point
 
 def compute_time_to_impact(host_uav:UAV_template, other_uav:UAV_template):
     host_pos = host_uav.current_position
@@ -101,3 +102,9 @@ def tangent_vecs_from_external_pt(xp, yp, a, b, r):
     vec2 = pt2 - np.array([xp, yp])
 
     return vec1, vec2
+
+def euclidean_distance(a:Point, b:Point):
+    if a.has_z and b.has_z:
+        return ((a.x - b.x)**2 + (a.y - b.y)**2 + (a.z - b.z)**2)**0.5
+    else:
+        return ((a.x - b.x)**2 + (a.y - b.y)**2)**0.5

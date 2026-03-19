@@ -17,9 +17,29 @@ import json
 
 #### ------------ CONFIG ------------ ####
 
-# Reserved type name for RL-training UAVs — controller is assigned at training time.
+# Reserved type name for RL-training UAVs — controller is assigned at training time. 
+# Need to think about test time, and connection of policy during test.
+
+# TODO:
+# USE 'mode' for agent assignment. - if mode train 
+# if mode 'train' UAV has no controller, elif mode 'test' UAV must have mapping to RL controller
+# use AerBus to extract UAV state information for mode: 'test' RL controller. 
+
+# Multi-agent RL - 
+# steps: 
+# define a new reserved_type_learning -- maybe change 'LEARNING' TO 'SINGLE_AGENT_LEARNING', this will make more sense when we add 'MULTI_AGENT_LEARNING'
+# if MULTI_AGENT_LEARNING: 
+#   capture all the UAVs with same policy. 
+#   So this means we will have to add a new UAV  attr to UAVFleetInstanceConfig - policy_id, 
+#   MULTI_AGENT_LEARNING UAVs with same policy_id string are assigned one policy
+#   the rest of the logic is the same as single agent - all UAVs that belong to the same policy 
+#                                                       should have the same dynamics, sensor, planner(if needed)
+# else :
+#   follow existing rules 
+
+
 RESERVED_TYPE_LEARNING = 'LEARNING'
-RESERVER_TYPE_MODE: set[str] = {'TRAIN', 'TEST'}
+RESERVED_TYPE_MODE: set[str] = {'TRAIN', 'TEST'}
 # Valid string identifiers for each component type.
 # Dynamics, controller, sensor classes are wired separately once those modules are ready.
 VALID_DYNAMICS: set[str] = {'PointMass', 'SixDOF', 'TwoDVector-Holonomic', 'ORCA'}
@@ -158,7 +178,7 @@ class UAVFleetInstanceConfig(BaseModel):
     controller: str  # None valid only for LEARNING type
     sensor: str             # must be a key in VALID_SENSORS
     planner: str            # must be a key in VALID_PLANNERS
-    mode: str
+    mode: Optional[str] = None  # required for LEARNING type only; must be in RESERVED_TYPE_MODE
 
     @field_validator('type_name')
     @classmethod
@@ -216,11 +236,19 @@ class UAVFleetInstanceConfig(BaseModel):
     
     @model_validator(mode='after')
     def learning_type_mode_check(self) -> 'UAVFleetInstanceConfig':
-        """NON LEARNING UAVs may omit mode (RL policy requires mode to determine train or test)"""
-        if self.type_name == RESERVED_TYPE_LEARNING and self.mode not in RESERVER_TYPE_MODE:
-            raise ValueError(
-                f'mode must be set for LEARNING type from: {RESERVER_TYPE_MODE}, current mode: {self.mode}'
-            )
+        """mode must be set for LEARNING types and must NOT be set for any other type."""
+        if self.type_name == RESERVED_TYPE_LEARNING:
+            if self.mode is None or self.mode not in RESERVED_TYPE_MODE:
+                raise ValueError(
+                    f"LEARNING type requires mode from {RESERVED_TYPE_MODE}, got: {self.mode!r}"
+                )
+        else:
+            if self.mode is not None:
+                raise ValueError(
+                    f"mode must only be set for LEARNING type, got mode={self.mode!r} "
+                    f"on type_name='{self.type_name}'"
+                )
+        return self
 
 class UAMConfig(BaseModel):
     """Root config object — mirrors the top-level keys of sample_config.yaml.
