@@ -334,7 +334,7 @@ class SimulatorManager:
         Return the integer id of the first LEARNING UAV in atc.uav_dict.
         Returns None if no LEARNING UAV is present (e.g. before the first reset).
         """
-        for uid, uav in self.simulator_manager.atc.uav_dict.items():
+        for uid, uav in self.atc.uav_dict.items():
             if getattr(uav, 'type_name', None) == RESERVED_TYPE_LEARNING:
                 return uid
         return None

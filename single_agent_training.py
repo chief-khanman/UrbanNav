@@ -24,7 +24,12 @@ print(env.action_space.sample(), '\n')
 print('Action space shape: ')
 print(env.action_space.sample().shape, '\n')
 
-print(env.reset(seed=123))
+env.reset()
+
+for _ in range(10):
+    sample_action = env.action_space.sample()
+    print(env.step(sample_action))
+
 # # Train RL policy
 # model = PPO("MlpPolicy", env, verbose=1)
 # model.learn(total_timesteps=100000)
