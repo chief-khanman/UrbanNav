@@ -71,3 +71,5 @@ class HolonomicDynamics(Dynamics):
             uav.current_position.x + uav.vx * self.dt,
             uav.current_position.y + uav.vy * self.dt,
         )
+        uav.px = uav.current_position.x
+        uav.py = uav.current_position.y

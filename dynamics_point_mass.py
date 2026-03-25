@@ -35,11 +35,25 @@ class PointMass(Dynamics):
         # update velocity
         uav.vx = uav.current_speed * math.cos(uav.current_heading)
         uav.vy = uav.current_speed * math.sin(uav.current_heading)
-        # uav.vz -> unchanged
-        uav.current_position = Point(uav.current_position.x + uav.vx * self.dt, uav.current_position.y + uav.vy * self.dt)
+
+        new_x = uav.current_position.x + uav.vx * self.dt
+        new_y = uav.current_position.y + uav.vy * self.dt
+
+        if uav.mission_end_point.has_z:
+            # Proportional altitude control toward target z.
+            # Acceleration-limited: vz ramps up/down at max_vertical_acceleration per second.
+            target_z = uav.mission_end_point.z
+            vz_command = np.clip((target_z - uav.pz) * 0.5, -uav.max_speed, uav.max_speed)
+            dvz_max = uav.max_vertical_acceleration * self.dt
+            uav.vz = np.clip(vz_command, uav.vz - dvz_max, uav.vz + dvz_max)
+            uav.pz += uav.vz * self.dt
+            uav.current_position = Point(new_x, new_y, uav.pz)
+        else:
+            uav.vz = 0.0
+            uav.current_position = Point(new_x, new_y)
+
         uav.px = uav.current_position.x
         uav.py = uav.current_position.y
-        # pz unchanged in 2D model
 
     def update(self, uav_id, action):
         super().update(uav_id, action)

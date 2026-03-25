@@ -1,3 +1,4 @@
+import math
 from typing import List
 from shapely import Point
 from plan_template import PlannerTemplate
@@ -51,7 +52,8 @@ class HolonomicPlanner(PlannerTemplate):
             return [self.waypoints[-1]]
 
         target = self.waypoints[self.current_idx]
-        dist = target.distance(current_pos)
+        # Holonomic dynamics are 2D-only (no z axis); use explicit 2D distance.
+        dist = math.hypot(target.x - current_pos.x, target.y - current_pos.y)
 
         if dist < self.threshold:
             self.current_idx += 1

@@ -45,12 +45,13 @@ class UAV_template(ABC):
         self.nmac_radius = nmac_radius
         self.detection_radius = detection_radius
         
-        # UAV physics limit - WILL BE EXTRACTED FROM CONFIG - REMOVE DEFAULT VALUE 
+        # UAV physics limit - WILL BE EXTRACTED FROM CONFIG - REMOVE DEFAULT VALUE
         self.max_speed:float = 30.0
         self.max_velocity:float
-        self.max_acceleration:float = 5.0 # Passed to DynamicsPointMass for action renormalization
-        self.max_heading_change:float = math.pi # Passed to DynamicsPointMass for action renormalization
-        self.max_lateral_acceleration: float = 9.8 #m/s^2 (approx 1G turn limit)
+        self.max_acceleration:float = 3.0          # linear longitudinal/horizontal acceleration (m/s²)
+        self.max_vertical_acceleration:float = 2.0  # climb/descent acceleration (m/s²); ~0.2G comfort limit
+        self.max_heading_change:float = math.pi
+        self.max_lateral_acceleration: float = 9.8  # centripetal G-limit during turns (~1G); sets max yaw rate
         
         # UAV incidence counter/metric
         self.nmac_count:int = 0

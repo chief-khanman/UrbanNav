@@ -122,6 +122,7 @@ class UAVTypeConfig(BaseModel):
     detection_radius: float
     max_speed: float
     max_acceleration: float
+    max_vertical_acceleration: float  # max climb/descent acceleration (m/s²)
     max_heading_change: float   # radians
     max_velocity: float
 
@@ -135,6 +136,7 @@ UAV_TYPE_REGISTRY.update({
         detection_radius=500.0,
         max_speed=10.0,
         max_acceleration=3.0,
+        max_vertical_acceleration=2.0,
         max_heading_change=math.pi,
         max_velocity=15.0,
     ),
@@ -144,6 +146,7 @@ UAV_TYPE_REGISTRY.update({
         detection_radius=700.0,
         max_speed=7.0,
         max_acceleration=1.5,
+        max_vertical_acceleration=1.0,
         max_heading_change=math.pi,
         max_velocity=10.0,
     ),
@@ -153,6 +156,7 @@ UAV_TYPE_REGISTRY.update({
         detection_radius=500.0,
         max_speed=10.0,
         max_acceleration=3.0,
+        max_vertical_acceleration=2.0,
         max_heading_change=math.pi,
         max_velocity=15.0,
     ),
@@ -162,6 +166,7 @@ UAV_TYPE_REGISTRY.update({
         detection_radius=500.0,
         max_speed=10.0,
         max_acceleration=3.0,
+        max_vertical_acceleration=2.0,
         max_heading_change=math.pi,
         max_velocity=15.0,
     ),

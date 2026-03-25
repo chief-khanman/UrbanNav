@@ -76,8 +76,7 @@ class MetricsCollector:
                 'vx':              getattr(uav, 'vx', 0.0),
                 'vy':              getattr(uav, 'vy', 0.0),
                 'vz':              getattr(uav, 'vz', 0.0),
-                #TODO: fix logic for incrementing nmac_count - sensor[uav_instance].get_nmac() -> increment uav.nmac_count
-                'nmac_count':      getattr(uav, 'nmac_count', 0), #! sensor does not increment NMAC count
+                'nmac_count':      0,  # patched below from nmac_dict once collisions are parsed
                 'mission_complete': getattr(uav, 'current_mission_complete_status', False),
                 'dist_to_goal':    dist_to_goal,
             }
@@ -114,6 +113,13 @@ class MetricsCollector:
                 if ra_ids:
                     collision_summary['ra_collision_ids'].append(uid)
 
+            # Patch per-UAV nmac_count: number of NMAC partners this step.
+            # The UAV object's attribute is never incremented by the sensor,
+            # so we derive the count directly from nmac_dict here.
+            for uid, partners in (nmac_dict or {}).items():
+                if partners and uid in uav_snapshots:
+                    uav_snapshots[uid]['nmac_count'] = len(partners)
+
         step_record: Dict[str, Any] = {
             'step':            state.currentstep,
             'num_active_uavs': len(uav_dict),
@@ -147,6 +153,11 @@ class MetricsCollector:
             return {}
 
         total_nmac_events      = sum(len(s['collisions']['nmac_pairs'])          for s in self._steps)
+        total_nmac_detections  = sum(
+            snap['nmac_count']
+            for s in self._steps
+            for snap in s['uavs'].values()
+        )
         total_uav_col_events   = sum(len(s['collisions']['uav_collision_pairs'])  for s in self._steps)
         total_ra_col_events    = sum(len(s['collisions']['ra_collision_ids'])     for s in self._steps)
         peak_active_uavs       = max(s['num_active_uavs'] for s in self._steps)
@@ -192,6 +203,7 @@ class MetricsCollector:
         return {
             'total_steps':              len(self._steps),
             'total_nmac_events':        total_nmac_events,
+            'total_nmac_detections':    total_nmac_detections,
             'total_uav_collision_events': total_uav_col_events,
             'total_ra_collision_events':  total_ra_col_events,
             'unique_uavs':              len(all_uav_ids),

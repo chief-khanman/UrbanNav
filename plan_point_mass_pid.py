@@ -1,3 +1,4 @@
+import math
 from typing import List
 from shapely import Point
 from plan_template import PlannerTemplate
@@ -47,7 +48,10 @@ class PointMassPIDPlanner(PlannerTemplate):
             return [self.waypoints[-1]]
 
         target = self.waypoints[self.current_idx]
-        dist = target.distance(current_pos)
+        # Use 2D distance: altitude is managed by PointMass dynamics directly,
+        # not by the planner. Using 3D distance would prevent waypoint advancement
+        # when x/y are converged but z is still far from the target.
+        dist = math.hypot(target.x - current_pos.x, target.y - current_pos.y)
 
         if dist < self.threshold:
             self.current_idx += 1

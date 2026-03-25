@@ -89,7 +89,8 @@ class SimulatorManager:
         # create vertiports
         num_vp = self.config.airspace.number_of_vertiports 
         # change this method to build vertiports in different ways 
-        self.airspace.add_n_random_vps_to_vplist(num_vertiports=num_vp)
+        self.airspace.add_n_random_vps_to_vplist(num_vertiports=num_vp,
+                                                  mode=self.config.simulator.mode)
         
         ## ----> VP_LIST <---- ##
         # ----> self.airspace.vertiport_list <---- 
@@ -279,9 +280,12 @@ class SimulatorManager:
         """
         remove_uav_ids: set = set()
 
-        # UAV-UAV: values are UAV IDs (symmetric detection covers all involved UAVs)
-        for colliding_uavs in collision_dict_uavS.values():
+        # UAV-UAV: both the reporting UAV (key) and its collision partners (values)
+        # must be removed — detection may be asymmetric so iterating values alone
+        # can miss the UAV that reported the collision.
+        for uav_id, colliding_uavs in collision_dict_uavS.items():
             if colliding_uavs:
+                remove_uav_ids.add(uav_id)
                 remove_uav_ids.update(colliding_uavs)
 
         # Restricted area: values are RA IDs — use keys only
@@ -306,7 +310,14 @@ class SimulatorManager:
         control_actions_dict = self.controller_module.get_actions(plan_dict)
         updated_control_actions_dict = self.map_actions_to_uavs(control_actions_dict, external_ids_actions_dict=external_action_dict) 
         
-        # DYNAMICS 
+        # Ensure every registered UAV gets an action so dynamics (e.g. altitude
+        # control in PointMass) always run — RL UAVs are intentionally skipped by
+        # AerBus, so inject a zero-hold action if no external action was provided.
+        for uav_id in self.dynamics_module.dynamics_obj_map:
+            if uav_id not in updated_control_actions_dict and uav_id in self.atc.uav_dict:
+                updated_control_actions_dict[uav_id] = (0.0, 0.0)
+
+        # DYNAMICS
         self.dynamics_module.step(actions_dict=updated_control_actions_dict)
 
         ### CHECK COLLISION ###

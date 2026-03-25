@@ -173,6 +173,7 @@ class ATC():
         uav.type_name = uav_blueprint.type_name
         uav.max_speed = type_cfg.max_speed
         uav.max_acceleration = type_cfg.max_acceleration
+        uav.max_vertical_acceleration = type_cfg.max_vertical_acceleration
         uav.max_heading_change = type_cfg.max_heading_change
         uav.max_velocity = type_cfg.max_velocity
 
@@ -240,7 +241,14 @@ class ATC():
         """
         uav = self.uav_dict[uav_id]
 
-        if (uav.current_position.distance(uav.mission_start_point) >= uav.vertiport_exit_distance) and (not uav.has_left_start) : 
+        sp = uav.mission_start_point
+        sp_z = sp.z if sp.has_z else 0.0
+        dist_3d = math.sqrt(
+            (uav.px - sp.x) ** 2 +
+            (uav.py - sp.y) ** 2 +
+            (uav.pz - sp_z) ** 2
+        )
+        if dist_3d >= uav.vertiport_exit_distance and not uav.has_left_start:
             self._takeoff_procedure(uav_id)
 
         return None
@@ -285,10 +293,16 @@ class ATC():
         # WORKING:  --- Mar 8, 2026        
         # New logic 
         
-        if (uav.current_position.distance(uav.mission_end_point) <= uav.mission_complete_distance) and (not uav.has_reached_end):
-            # for any UAV that has just arrived near end vertiport APPEND TO DQ - this is a container for UAV que for landing 
-            self.holding_pattern_at_vertiport(uav_id)        
-            
+        ep = uav.mission_end_point
+        ep_z = ep.z if ep.has_z else 0.0
+        dist_3d = math.sqrt(
+            (uav.px - ep.x) ** 2 +
+            (uav.py - ep.y) ** 2 +
+            (uav.pz - ep_z) ** 2
+        )
+        if dist_3d <= uav.mission_complete_distance and not uav.has_reached_end:
+            # for any UAV that has just arrived near end vertiport APPEND TO DQ - this is a container for UAV que for landing
+            self.holding_pattern_at_vertiport(uav_id)
 
         return None
     
@@ -322,8 +336,9 @@ class ATC():
         # UAV
         landing_uav = self.uav_dict[landing_uav_id]
         landing_uav.has_reached_end = True
-        landing_uav.operational = False 
-        landing_uav.uav_in_flight = False 
+        landing_uav.operational = False
+        landing_uav.uav_in_flight = False
+        landing_uav.current_mission_complete_status = True
         #
         # Add UAV to Vertiport and mark as no longer in flight
         landing_vertiport = landing_uav.end_vertiport
@@ -408,17 +423,13 @@ class ATC():
 
         return None
 
-    def wait_at_vertiport(self,uav_id):
+    def wait_at_vertiport(self, uav_id):
         uav = self.uav_dict[uav_id]
-        uav.start_vertiport, uav.end_vertiport = uav.end_vertiport, uav.end_vertiport
-        #uav.assign_start_end(start_vertiport, end_vertiport)
-        uav.current_position = uav.end_vertiport.location
+        uav.start_vertiport = uav.end_vertiport
         uav.operational = False
         uav.uav_in_flight = False
         uav.current_speed = 0
-        #! NO more adding to vertiport.uav_id_list
-        #self.assign_mission_start_end_vertiport(uav_id, start_vertiport, end_vertiport)
-        print(f'UAV id: {uav.id_} waiting at vertiport id: {uav.start_vertiport.id}. Start vp == end vp: {uav.start_vertiport.id == uav.end_vertiport.id}')
+        print(f'UAV id: {uav.id_} waiting at vertiport id: {uav.start_vertiport.id}')
         return None
     
     

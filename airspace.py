@@ -233,7 +233,7 @@ class Airspace:
             sample_space = self.location_utm_gdf['geometry'].iloc[0]
             for tag_value in self.location_tags.keys():
                 # sample_space_geoseries:GeoSeries = self.location_utm_gdf.iloc[0,0]
-                sample_space = shapely.difference(sample_space, self.location_utm_buffer[tag_value].union_all())
+                sample_space = shapely.difference(sample_space, self.location_utm_buffer[tag_value].unary_union)
                 
             sample_space_gdf = GeoSeries(sample_space)
         else: 
@@ -334,12 +334,15 @@ class Airspace:
         return sampled_vertiports
 
     # VERTIPORT CREATION - OPTION 1
-    def add_n_random_vps_to_vplist(self, num_vertiports: int) -> None:
+    def add_n_random_vps_to_vplist(self, num_vertiports: int, mode: str = '2D') -> None:
         """
         Creates a specified number of random vertiports within the airspace.
 
         Args:
             num_vertiports (int): The number of vertiports to create.
+            mode (str): '2D' creates flat vertiports (no z); '3D' adds a random
+                        altitude in [1500, 3500] m.  Defaults to '2D' so callers
+                        that do not pass mode get 2D behaviour.
 
         Returns:
             None
@@ -360,7 +363,7 @@ class Airspace:
         if self.airspace_restricted_area_tag_list:
             sample_space = self.location_utm_gdf['geometry'].iloc[0]
             for tag_value in self.location_tags.keys():
-                sample_space = shapely.difference(sample_space, self.location_utm_buffer[tag_value].union_all())
+                sample_space = shapely.difference(sample_space, self.location_utm_buffer[tag_value].unary_union)
             sample_space_gdf = GeoSeries(sample_space)
         else: 
             sample_space = self.location_utm_gdf
@@ -374,8 +377,10 @@ class Airspace:
             #* FIX procedure : 
             #  add height to geopandas dataframe - such that each polygon in location_utm has a corresponding height attr 
             
-            # quick fix - Mar, 2026
-            location = Point(location.x, location.y, random.randint(1500, 3500)) # a,b is set to show range of possible UAV flight altitude 
+            if mode == '3D':
+                location = Point(location.x, location.y, random.randint(1500, 3500))
+            else:
+                location = Point(location.x, location.y)
             self.vertiport_list.append(
                 Vertiport(location=location)
             )

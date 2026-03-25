@@ -40,7 +40,7 @@ class Renderer:
 
     Visual style (3D):
         - Map boundary: gray Poly3DCollection at z=0
-        - Restricted areas: red Poly3DCollection at z=0
+        - Restricted areas: red Poly3DCollection at z=0; buffer: orange Poly3DCollection at z=0, alpha 0.3
         - Vertiports: small green bar3d boxes at their altitude
         - UAV detection radius: equatorial ring (green dashed)
         - UAV NMAC radius: equatorial ring (orange)
@@ -64,6 +64,7 @@ class Renderer:
         self._sim_mode: str          = simulator_mode    # '2D' or '3D'
         self._airspace               = None
         self._extent: Optional[Tuple[float, float, float, float]] = None  # (xmin,xmax,ymin,ymax)
+        self._z_extent: Optional[Tuple[float, float]] = None              # (z_lo, z_hi) — fixed for episode
 
         # Offline storage
         self._frames: List[Dict]     = []
@@ -95,7 +96,8 @@ class Renderer:
         self._frames       = []
         self._step_counter = 0
         self._rt_traj      = {}
-        self._extent       = self._compute_extent()
+        self._extent        = self._compute_extent()
+        self._z_extent      = self._compute_z_extent()
 
         if self._fig is not None:
             plt.close(self._fig)
@@ -423,14 +425,12 @@ class Renderer:
         else:
             self._fit_axis_3d(ax, frame)
 
-        # z limits: cover the UAV altitude range (vertiports are 1500–3500 m)
-        zs_all = [d['z'] for d in frame['uavs'].values()]
-        if zs_all:
-            z_lo = min(0.0, min(zs_all) - 500)
-            z_hi = max(zs_all) + 500
+        # z limits: fixed range computed from vertiport altitudes at reset() time
+        # so the axis stays stable as UAVs climb/descend between reassignments.
+        if self._z_extent is not None:
+            ax.set_zlim3d(*self._z_extent)
         else:
-            z_lo, z_hi = 0.0, 4000.0
-        ax.set_zlim3d(z_lo, z_hi)
+            ax.set_zlim3d(0.0, 4000.0)
 
         ax.set_xlabel('X (m)')
         ax.set_ylabel('Y (m)')
@@ -510,7 +510,7 @@ class Renderer:
         except Exception:
             pass
 
-        # Restricted areas
+        # Restricted areas (red) + buffers (orange)
         try:
             for tag in self._airspace.location_tags.keys():
                 for _, row in self._airspace.location_utm[tag].iterrows():
@@ -520,7 +520,15 @@ class Renderer:
                         rings = _clipped_verts(poly)
                         if rings:
                             ax.add_collection3d(
-                                Poly3DCollection(rings, alpha=0.5, color='red')
+                                Poly3DCollection(rings, alpha=0.7, color='red')
+                            )
+                for geom in self._airspace.location_utm_buffer[tag]:
+                    polys = geom.geoms if hasattr(geom, 'geoms') else [geom]
+                    for poly in polys:
+                        rings = _clipped_verts(poly)
+                        if rings:
+                            ax.add_collection3d(
+                                Poly3DCollection(rings, alpha=0.3, color='orange')
                             )
         except Exception:
             pass
@@ -580,6 +588,21 @@ class Renderer:
         margin = max(2000.0, (max(xs) - min(xs)) * 0.25, (max(ys) - min(ys)) * 0.25)
         return (min(xs) - margin, max(xs) + margin,
                 min(ys) - margin, max(ys) + margin)
+
+    def _compute_z_extent(self) -> Optional[Tuple[float, float]]:
+        """Compute a fixed z range from vertiport altitudes plus margin.
+
+        Called once at reset() so the 3D z-axis stays stable across the full
+        episode regardless of which altitude UAVs are currently flying to.
+        Returns None when no vertiports have a z coordinate (2D mode).
+        """
+        if self._airspace is None or not self._airspace.vertiport_list:
+            return None
+        zs = [vp.location.z for vp in self._airspace.vertiport_list
+              if hasattr(vp, 'location') and vp.location.has_z]
+        if not zs:
+            return None
+        return (0.0, max(zs) + 500.0)
 
     def _fit_axis(self, ax, frame: Dict) -> None:
         """Fallback: fit 2D axis to current UAV positions when no fixed extent."""

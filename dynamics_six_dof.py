@@ -45,7 +45,7 @@ class SixDOF(Dynamics):
         # Clip acceleration commands to UAV limits
         ax = np.clip(ax_cmd, -uav.max_acceleration, uav.max_acceleration)
         ay = np.clip(ay_cmd, -uav.max_acceleration, uav.max_acceleration)
-        az = np.clip(az_cmd, -uav.max_acceleration, uav.max_acceleration)
+        az = np.clip(az_cmd, -uav.max_vertical_acceleration, uav.max_vertical_acceleration)
 
         # Integrate velocity
         uav.vx += ax * self.dt
