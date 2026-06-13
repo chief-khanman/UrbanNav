@@ -62,8 +62,13 @@ from component_schema import RESERVED_TYPE_LEARNING
 #                     B5 queue_length, B6 fleet_utilization,
 #                     B7 demand_served_ratio.
 # =============================================================================
+#TODO: general TODO list and directives to follow when updating/editing code 
+# 1. remove [BAND2-DIRECT/INDIRECT] from docstring 
+# 2. do not change/update/edit parts of code that are not relevant - helps with diffing and understanding changes easily
+#  
 
-class SimulatorManager:
+
+class SimulatorManagerVPDesign:
     '''Primary class that orchestrates and manages assets/data_classes,
       calculation, networking, collision handler for UAM simulator. '''
     
@@ -300,7 +305,13 @@ class SimulatorManager:
         self._vp_index_to_id: List[int] = [vp.id for vp in self.airspace.vertiport_list]
         self._pads_occupied_sum  = np.zeros(n_vp, dtype=float)
         self._queue_length_sum   = np.zeros(n_vp, dtype=float)
+        
+        #TODO: this needs to be redefined as an int - UAV in flight will always be a whole number no need for float 
         self._uavs_in_flight_sum = 0.0
+        
+        #TODO: can this step count use simulator current_step -> self._state.current_step
+        #TODO: current implementation of self._state.current_step matches self._step_count 
+        #TODO: - unless there is any special reason, change/update this to use self._state.current_step
         self._step_count         = 0
     
     
@@ -585,15 +596,15 @@ class SimulatorManager:
     #
     # Why a departure queue entry stores (dest_vp_id, enqueue_step):
     #   dest_vp_id  : used by _dispatch_mission to set the UAV's target.
-    #   enqueue_step: used to compute wait time if we later add request-drop
+    #   enqueue_step: used to compute wait time if we later add "request-drop"
     #                 logic (max wait threshold). Currently stored but not used
     #                 for dropping; it feeds potential Level 3 extensions.
     # ─────────────────────────────────────────────────────────────────────────
     def _generate_demand(self):
-        '''[BAND2-DIRECT] Poisson trip generation — runs once per step.
+        '''Poisson trip generation — runs once per step.
         Pushes trip requests into vertiport departure queues.'''
 
-        # Build region→vertiport lookup once per episode (stable after reset).
+        # Build region to vertiport lookup once per episode (stable after reset).
         if not hasattr(self, '_region_to_vp') or self._region_to_vp is None:
             self._region_to_vp: Dict[int, int] = {
                 region: vp_id
@@ -603,7 +614,9 @@ class SimulatorManager:
         dt_min = self.dt / 60.0   # convert simulator dt (seconds) to minutes
 
         for i in range(self.n_regions):
-            origin_vp_id = self._region_to_vp.get(i)
+            #TODO: logic does not make sense -
+            #each region has multiple vertiports, so how are we selecting specific vertiport
+            origin_vp_id = self._region_to_vp.get(i) #here we are selecting the first vertiport from a region
             if origin_vp_id is None:
                 continue   # region i has no selected vertiport this episode
 
@@ -615,6 +628,8 @@ class SimulatorManager:
                 if dest_vp_id is None:
                     continue
 
+                # lambda <- lambda_matrix[i,j] 
+                # lambda is trips/min from i to j 
                 rate = self.lambda_matrix[i, j]   # trips/min
                 if rate <= 0.0:
                     continue
@@ -635,9 +650,12 @@ class SimulatorManager:
     #
     # Why a separate method?
     #   Mission assignment in step() now needs three pieces of information that
-    #   did not exist before: the destination vertiport (from the queue), the
-    #   step at which the trip was enqueued (for depart_step logging), and the
-    #   OD region pair (for trip_log). Bundling this into one method keeps
+    #   did not exist before: 
+    #       the destination vertiport (from the queue), 
+    #       the step at which the trip was enqueued (for depart_step logging), 
+    #       and 
+    #       the OD region pair (for trip_log). 
+    #   Bundling this into one method keeps
     #   step() readable and makes the logging contract explicit.
     #
     # What it writes to _trip_log:
@@ -647,9 +665,12 @@ class SimulatorManager:
     #   The key used to correlate later updates is uav_id — one active trip
     #   per UAV at a time (enforced by existing ATC assignment logic).
     # ─────────────────────────────────────────────────────────────────────────
-    def _dispatch_mission(self, uav_id: int, origin_vp_id: int,
-                          dest_vp_id: int, enqueue_step: int):
-        '''[BAND2-DIRECT] Assign a queued demand trip to an idle UAV and open
+    def _dispatch_mission(self, 
+                          uav_id: int, 
+                          origin_vp_id: int,
+                          dest_vp_id: int, 
+                          enqueue_step: int):
+        '''Assign a queued demand trip to an idle UAV and open
         a trip log entry.
 
         Args:
@@ -668,6 +689,7 @@ class SimulatorManager:
         #
         # TODO: replace with atc.assign_mission_to_target(uav_id, dest_vp_id)
         #       once ATC exposes a targeted assignment API.
+        #       one aspect has to be addressed, the origin_vp_id needs to match current_vp 
         self.atc.reassign_new_mission(uav_id)
 
         # Resolve region pair for this trip.
@@ -703,8 +725,14 @@ class SimulatorManager:
     # entry (land_step is None). One active trip per UAV at a time.
     # ─────────────────────────────────────────────────────────────────────────
     def _log_arrive_airspace(self, uav_id: int):
+        #TODO: this function name and operation is mis-leading 
+        #log_arrive_airspace means - we have already ensured the UAV has arrived in airspace somehow, 
+        #and now we are only logging that behavior - so the check for vertiport arrival needs to be performed in step(), 
+        #if arrived then trigger this function 
         '''[BAND2-DIRECT] Log the step at which uav_id entered the landing
         queue. Fills arrive_airspace_step in the open trip log entry.'''
+        #TODO: quick check, if a UAV has collided, is it removed from the simulation 
+        #TODO: this check for UAV is None is redundant - give reason if not 
         uav = self.atc.uav_dict.get(uav_id)
         if uav is None:
             return
@@ -729,8 +757,10 @@ class SimulatorManager:
     # If arrive_airspace_step was never set (UAV landed without queuing),
     # we backfill it with land_step so that wait_time = 0 for that trip.
     # ─────────────────────────────────────────────────────────────────────────
-    def _log_land(self, uav_id: int, vertiport_id: int):
-        '''[BAND2-DIRECT] Record completed landing and increment OD counters.'''
+    def _log_land(self, 
+                  uav_id: int, 
+                  vertiport_id: int):
+        '''Record completed landing and increment OD counters.'''
         for entry in reversed(self._trip_log):
             if entry['uav_id'] == uav_id and entry['land_step'] is None:
                 entry['land_step'] = self._state.currentstep
@@ -762,17 +792,20 @@ class SimulatorManager:
     def _accumulate_step_metrics(self):
         '''[BAND2-DIRECT] Accumulate step-level values for time-averaged
         metrics B4 (utilization), B5 (queue_length), B6 (fleet_utilization).'''
-        self._step_count += 1
-
+        #TODO: is there any good reason why we should have a separate step_count for logging VP design metrics,
+        #      There already exists step count -> self._state.current_step
+        #      If there is reason for keeping separate step_count provide reason   
+        self._step_count += 1 
         for k, vp_id in enumerate(self._vp_index_to_id):
             vertiport = next(
                 (vp for vp in self.airspace.vertiport_list if vp.id == vp_id), None
-            )
+                            )
             if vertiport is None:
                 continue
             self._pads_occupied_sum[k]  += len(vertiport.uav_id_list)
             self._queue_length_sum[k]   += len(vertiport.get_landing_queue()
-                                               if hasattr(vertiport, 'get_landing_queue')
+                                               #TODO: remove redundant conditional - provide vertiport script to Claude 
+                                               if hasattr(vertiport, 'get_landing_queue') #! it exists but not as an attr, its a function of vertiport that returns vertiport.landing_queue
                                                else vertiport.landing_queue)
 
         in_flight = sum(
@@ -826,7 +859,12 @@ class SimulatorManager:
                 vp_index_to_id          : list[int]  vertiport id per index k
         '''
         N   = self.n_regions
+        
+        #TODO: why is this variable not used - why was this created in the first place - 
+        #TODO: do not remove - provide reasoning for existence 
         n_vp = len(self._vp_index_to_id)
+        
+        #TODO: _step_count to self._state.current_step
         T   = max(self._step_count, 1)   # guard against division by zero
 
         # ── B1 / B2 / B3: per-OD-pair metrics from trip log ──────────────────
@@ -840,8 +878,11 @@ class SimulatorManager:
                 continue
             if entry['land_step'] is None:
                 continue   # trip not completed — skip (counts as unserved)
-
+            
+            # total trip time(start VP to end VP + wait_time at end VP)
             trip_steps = entry['land_step'] - entry['depart_step']
+            
+            # wait time before landing at end VP 
             wait_steps = entry['land_step'] - entry['arrive_airspace_step']
 
             trip_time_sum[o, d]   += trip_steps * self.dt   # seconds
@@ -852,13 +893,15 @@ class SimulatorManager:
         pair_avg_trip_time = np.where(
             completed_count > 0,
             trip_time_sum / np.maximum(completed_count, 1),
-            0.0   # 0 flags "no completed trips" for RL env fallback
+            #Research_Question: should 'condition y' be set to 0, or a very high number like 999_999 to indicate non-completion of trip 
+            0.0   # 0 flags "no completed trips" for RL env fallback 
         )
 
         # B2: pair_avg_wait_time — mean pad wait per OD pair
         pair_avg_wait_time = np.where(
             completed_count > 0,
             wait_time_sum / np.maximum(completed_count, 1),
+            #Research_Question: should 'condition y' be set to 0, or a very high number like 999_999 to indicate non-completion of trip             
             0.0
         )
 
@@ -866,6 +909,7 @@ class SimulatorManager:
         pair_demand_served_ratio = np.where(
             self._demand_gen_od > 0,
             self._trips_completed_od / np.maximum(self._demand_gen_od, 1),
+            #Research_Question: should 'condition y' be set to 0, or a very high number like 999_999 to indicate non-completion of trip                         
             1.0   # no demand on this pair → define as fully served
         )
 
@@ -925,6 +969,19 @@ class SimulatorManager:
         # rebuilds it on the first step of the new episode.
         self._region_to_vp = None
 
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     # do we directly add the command to the UAV
     # OR do collect these external commands and then combine with internal commands and dispatch at the same time 
     # def dispatch_commands(self, commands: UAVCommandBundle):

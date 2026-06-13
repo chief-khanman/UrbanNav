@@ -1,13 +1,20 @@
 #! rename - main modules/scripts to have a airspace/aeronautics theme
 from typing import List, Dict, Any, Tuple
 import numpy as np
-from simulator_manager import SimulatorManager
+from simulator_manager_vp_design import SimulatorManagerVPDesign
 from renderer import Renderer
 from logger import Logger
 from component_schema import UAMConfig, ActionType, UAVCommand, UAVCommandBundle, SimulatorState, RESERVED_TYPE_LEARNING
 
 
-class UAMSimulator:
+#TODO: general TODO list and directives to follow when updating/editing code 
+# 1. remove [BAND2-DIRECT/INDIRECT] from docstring 
+# 2. do not change/update/edit parts of code that are not relevant - helps with diffing and understanding changes easily
+#  
+
+
+
+class UAMSimulatorVPDesign:
     """Main simulator coordinating all components"""
 
     def __init__(self,
@@ -19,7 +26,9 @@ class UAMSimulator:
         self.total_timestep = self.config.simulator.total_timestep
 
         ##### Simulator Manager #####
-        self.simulator_manager = SimulatorManager(self.config)
+        #TODO: add/create variables - OD matrix(lambda_matrix), vertiport_regions_map
+
+        self.simulator_manager = SimulatorManagerVPDesign(self.config, lambda_matrix, vertiport_region_map)
 
         ##### Rendering #####
         self.renderer = Renderer(self.config.rendering, self.config.simulator.mode)

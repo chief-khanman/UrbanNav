@@ -1,3 +1,15 @@
+#TODO: general TODO list and directives to follow when updating/editing code 
+# 1. remove [BAND2-DIRECT/INDIRECT] from docstring 
+# 2. do not change/update/edit parts of code that are not relevant - helps with diffing and understanding changes easily
+#  
+
+#TODO: create a new config - for testing functionality - 
+# where vertiports are selected nearby for quick assessment of all major functionality
+
+
+
+
+
 # UAM Simulator Configuration
 # component_schema.py structure has to respect this config.yaml
 
