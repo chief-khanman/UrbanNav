@@ -224,6 +224,9 @@ class Airspace:
         vp_id_list = [vp.id for vp in self.vertiport_list]
         return vp_id_list
     
+    #TODO: create a dict that maps vp_id to vp - this will be necessary for VP design  
+    
+    
     def create_vertiport_at_location(self, location:Tuple)-> Vertiport:
         """Create a vertiport at position(x,y)."""
         position = Point(location[0], location[1])
