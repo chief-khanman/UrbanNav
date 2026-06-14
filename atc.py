@@ -57,11 +57,7 @@ class ATC():
         return None
     #* Future task - end  *#
 
-    
-    #TODO: create necessary functions that will handle
-    # 1. hold at vertiport OR
-    # 2. reassignment for new mission
-    # 3. ...   
+
     def update(self):
 
         # For now, check mission completion
@@ -193,8 +189,6 @@ class ATC():
         
         return None 
     
-    # WORKING:  --- Feb 24, 2026
-    # change use of UAV and replace with uav_id 
     def assign_mission_start_end_vertiport(self, uav_id:int, start:Vertiport, end:Vertiport )->None:
         """
         THIS IS THE MAIN FUNCTION THAT NEEDS TO BE CALLED WHEN A NEW MISSION IS ASSIGNED. 
