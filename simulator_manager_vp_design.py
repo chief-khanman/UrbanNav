@@ -20,7 +20,8 @@ class SimulatorManagerVPDesign:
     def __init__(self,
                  config: UAMConfig,
                  lambda_matrix: Optional[np.ndarray] = None,
-                 vertiport_region_map: Optional[Dict[int, int]] = None):
+                 vertiport_region_map: Optional[Dict[int, int]] = None,
+                 zone_region_map: Optional[Dict] = None):
         '''Initialize simulator manager.
 
         Args:
@@ -44,6 +45,13 @@ class SimulatorManagerVPDesign:
                                   manager level for fast lookup and is updated
                                   each episode by the RL env via
                                   update_vertiport_region_map().
+            zone_region_map     : Static Band 1 output mapping zone_id to
+                                  region_id. Does not change between episodes.
+                                  Loaded once from zone_region_map.csv. Used
+                                  by the RL environment to translate selected
+                                  vertiport zones into region assignments when
+                                  building vertiport_region_map per episode.
+                                  None if not supplied (standalone test mode).
         Returns:
             None
         '''
@@ -69,6 +77,11 @@ class SimulatorManagerVPDesign:
         # module used by the rest of the simulator so that demand stochasticity
         # is independently reproducible.
         self._demand_rng = np.random.default_rng(self.seed)
+
+        # Static zone→region mapping from Band 1. Does not change between
+        # episodes. Used by the RL env to build vertiport_region_map each
+        # episode. Empty dict when not supplied (standalone test mode).
+        self.zone_region_map: Dict = zone_region_map if zone_region_map is not None else {}
 
         return None
 
@@ -590,24 +603,29 @@ class SimulatorManagerVPDesign:
           The key used to correlate later updates is uav_id — one active trip
           per UAV at a time (enforced by existing ATC assignment logic).
 
-        TODO: replace with atc.assign_mission_to_target(uav_id, dest_vp_id)
-              once ATC exposes a targeted assignment API.
-              One aspect to address: origin_vp_id must match current_vp.
+        Targeted assignment is implemented by calling _uav.assign_start_end()
+        directly (same path as reassign_new_mission but with specific vertiports).
+        A dedicated atc.assign_mission_to_target() is not needed.
         '''
-        # Set the UAV's destination and mark it operational via ATC.
-        # reassign_new_mission() in its original form picks a random destination.
-        # A targeted assignment API (assign_mission_to_target) is a future task.
-        #!remove 
-        self.atc.reassign_new_mission(uav_id)
-
         # Resolve region pair for this trip.
         o_region = self.vertiport_region_map.get(origin_vp_id, -1)
         d_region = self.vertiport_region_map.get(dest_vp_id, -1)
-        #* new - accomplishes atc.assign_mission_to_target() - check atc, assign_mission_start_end_vertiport existed, so no need for new method
-        # temp-check - remove once logic is confirmed
+
+        # Assign targeted mission: set origin as start, dest as end.
+        # Uses assign_start_end directly (mirrors reassign_new_mission but
+        # with specific vertiports instead of random selection).
+        # Must NOT use assign_mission_start_end_vertiport here: that method
+        # appends to uav_id_list, but the UAV is already in origin_vp.uav_id_list
+        # from landing_procedure. A duplicate entry would leave a ghost after
+        # _takeoff_procedure removes only the first occurrence via list.remove().
         _uav = self.atc.uav_dict[uav_id]
+        # temp-check: after landing at origin_vp, uav.end_vertiport must equal origin_vp.
         assert _uav.end_vertiport == self._vp_id_to_vp[origin_vp_id]
-        self.atc.assign_mission_start_end_vertiport(uav_id=uav_id, start=self._vp_id_to_vp[origin_vp_id], end=self._vp_id_to_vp[dest_vp_id])
+        _uav.assign_start_end(
+            self._vp_id_to_vp[origin_vp_id],
+            self._vp_id_to_vp[dest_vp_id],
+            self.atc.airspace_mid_point_coord
+        )
 
         # Open a trip log entry; arrive_airspace_step and land_step are
         # filled in by _log_arrive_airspace() and _log_land() respectively.
@@ -694,9 +712,8 @@ class SimulatorManagerVPDesign:
         start of step() before this method is called).
         '''
         for k, vp_id in enumerate(self._vp_index_to_id):
-            vertiport = next(
-                (vp for vp in self.airspace.vertiport_list if vp.id == vp_id), None
-                            )
+            # O(1) lookup via _vp_id_to_vp (built in _init_demand_state).
+            vertiport = self._vp_id_to_vp.get(vp_id)
             if vertiport is None:
                 continue
             self._pads_occupied_sum[k] += len(vertiport.uav_id_list)

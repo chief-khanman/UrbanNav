@@ -36,16 +36,22 @@ def main() -> None:
         help='Path to Band 1 OD lambda matrix (.npy or .csv). '
              'If omitted, simulator uses random mission assignment.'
     )
+    parser.add_argument(
+        '--zone-region-map',
+        default=None,
+        metavar='PATH',
+        help='Path to Band 1 zone-region mapping (zone_region_map.csv). '
+             'Two-column CSV: zone_id, region_id. Static for the run — '
+             'does not change between episodes. Used by the RL env to build '
+             'vertiport_region_map per episode. Omit in standalone test mode.'
+    )
     args = parser.parse_args()
-    #TODO: add zone-region mapping data as path argument 
-    #zone-region mapping data will be used once for RL vertiport design problem - 
-    #the zone-region mapping does not change - during training/testing - only the node/edge data changes during training and testing of VP design RL problem
-    #zone-region mapping is collected as an output from BAND 1  as zone_region_map.csv
-    #perform corresponding changes to - 
-    # 1. uam_simulator_vp_design.py
-    # 2. simulator_manager_vp_design.py 
-    #for correctly integrating zone_region_map.csv 
-    sim = UAMSimulatorVPDesign(config_path=CONFIG_FILE, od_matrix_path=args.od_matrix)
+
+    sim = UAMSimulatorVPDesign(
+        config_path=CONFIG_FILE,
+        od_matrix_path=args.od_matrix,
+        zone_region_map_path=args.zone_region_map,
+    )
     sim.reset()
 
     rendering_on = sim.renderer.enabled

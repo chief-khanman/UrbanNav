@@ -1,5 +1,6 @@
 from typing import List, Dict, Any, Tuple, Optional
 import numpy as np
+import pandas as pd
 from simulator_manager_vp_design import SimulatorManagerVPDesign
 from renderer import Renderer
 from logger import Logger
@@ -11,15 +12,23 @@ class UAMSimulatorVPDesign:
 
     def __init__(self,
                  config_path: str,
-                 od_matrix_path: Optional[str] = None):
+                 od_matrix_path: Optional[str] = None,
+                 zone_region_map_path: Optional[str] = None):
         '''Initialize the simulator.
 
         Args:
-            config_path    : path to the YAML simulator config file.
-            od_matrix_path : optional path to the Band 1 OD lambda matrix.
-                             Supports .npy (numpy array) and .csv formats.
-                             If None, the simulator falls back to random
-                             mission assignment (no demand-driven dispatch).
+            config_path         : path to the YAML simulator config file.
+            od_matrix_path      : optional path to the Band 1 OD lambda matrix.
+                                  Supports .npy (numpy array) and .csv formats.
+                                  If None, the simulator falls back to random
+                                  mission assignment (no demand-driven dispatch).
+            zone_region_map_path: optional path to Band 1 zone-region mapping
+                                  (zone_region_map.csv). Two-column CSV:
+                                  first column = zone_id, second = region_id.
+                                  Static for the lifetime of the run — does not
+                                  change between episodes. Used by the RL env
+                                  to build vertiport_region_map per episode.
+                                  None in standalone test mode.
         '''
         # config - file with ATC, airspace, vertiport, UAV
         self.config = UAMConfig.load_from_yaml(config_path)
@@ -45,7 +54,18 @@ class UAMSimulatorVPDesign:
         # each episode when running under the RL wrapper.
         vertiport_region_map = None
 
-        self.simulator_manager = SimulatorManagerVPDesign(self.config, lambda_matrix, vertiport_region_map)
+        # Load static zone→region mapping from Band 1 output if supplied.
+        # CSV format: first column = zone_id, second column = region_id.
+        # Keys are kept as-is (str or int depending on CSV content).
+        if zone_region_map_path is not None:
+            _df = pd.read_csv(zone_region_map_path)
+            zone_region_map: Optional[Dict] = {
+                row[0]: int(row[1]) for row in _df.itertuples(index=False, name=None)
+            }
+        else:
+            zone_region_map = None
+
+        self.simulator_manager = SimulatorManagerVPDesign(self.config, lambda_matrix, vertiport_region_map, zone_region_map)
 
         ##### Rendering #####
         self.renderer = Renderer(self.config.rendering, self.config.simulator.mode)
