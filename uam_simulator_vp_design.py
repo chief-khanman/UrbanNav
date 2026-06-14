@@ -1,5 +1,4 @@
-#! rename - main modules/scripts to have a airspace/aeronautics theme
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 import numpy as np
 from simulator_manager_vp_design import SimulatorManagerVPDesign
 from renderer import Renderer
@@ -7,26 +6,44 @@ from logger import Logger
 from component_schema import UAMConfig, ActionType, UAVCommand, UAVCommandBundle, SimulatorState, RESERVED_TYPE_LEARNING
 
 
-#TODO: general TODO list and directives to follow when updating/editing code 
-# 1. remove [BAND2-DIRECT/INDIRECT] from docstring 
-# 2. do not change/update/edit parts of code that are not relevant - helps with diffing and understanding changes easily
-#  
-
-
-
 class UAMSimulatorVPDesign:
     """Main simulator coordinating all components"""
 
     def __init__(self,
-                 config_path:str):
+                 config_path: str,
+                 od_matrix_path: Optional[str] = None):
+        '''Initialize the simulator.
 
+        Args:
+            config_path    : path to the YAML simulator config file.
+            od_matrix_path : optional path to the Band 1 OD lambda matrix.
+                             Supports .npy (numpy array) and .csv formats.
+                             If None, the simulator falls back to random
+                             mission assignment (no demand-driven dispatch).
+        '''
         # config - file with ATC, airspace, vertiport, UAV
         self.config = UAMConfig.load_from_yaml(config_path)
         # total_time_step
         self.total_timestep = self.config.simulator.total_timestep
 
         ##### Simulator Manager #####
-        #TODO: add/create variables - OD matrix(lambda_matrix), vertiport_regions_map
+        # Load OD demand matrix from Band 1 output if a path is supplied.
+        # Supports .npy (numpy array) and .csv (comma-delimited) formats.
+        # When None, SimulatorManagerVPDesign falls back to random mission
+        # assignment so the simulator still runs in a standalone test context.
+        if od_matrix_path is not None:
+            if od_matrix_path.endswith('.npy'):
+                lambda_matrix = np.load(od_matrix_path)
+            else:
+                lambda_matrix = np.loadtxt(od_matrix_path, delimiter=',')
+        else:
+            lambda_matrix = None
+
+        # vertiport_region_map is built per episode by the RL environment
+        # when it selects one vertiport per region. Start as None here;
+        # update via simulator_manager.update_vertiport_region_map() before
+        # each episode when running under the RL wrapper.
+        vertiport_region_map = None
 
         self.simulator_manager = SimulatorManagerVPDesign(self.config, lambda_matrix, vertiport_region_map)
 
@@ -44,7 +61,7 @@ class UAMSimulatorVPDesign:
         self.renderer.reset(self.simulator_manager.airspace)
         self.logger.reset()
         self.logger.log_step()
-        
+
 
 
     def step(self, commands: UAVCommandBundle):

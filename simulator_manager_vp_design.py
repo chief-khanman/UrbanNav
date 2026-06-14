@@ -1,7 +1,7 @@
 import datetime
 import random
 from typing import Dict, List, Tuple, Any, Optional
-import numpy as np                          # [BAND2-DIRECT] Poisson sampling for demand generation requires numpy.
+import numpy as np
 from airspace import Airspace
 from atc import ATC
 from component_schema import UAMConfig
@@ -12,67 +12,12 @@ from dynamics_engine import DynamicsEngine
 from component_schema import UAVCommandBundle, ActionType, SimulatorState, build_fleet
 from component_schema import RESERVED_TYPE_LEARNING
 
-# =============================================================================
-# BAND 2 CHANGE LOG
-# =============================================================================
-# All modifications introduced for Band 2 of the MDP pipeline are marked with
-# inline tags: [BAND2-DIRECT] or [BAND2-INDIRECT].
-#
-# [BAND2-DIRECT]  — Code added or changed specifically to implement Band 2
-#                   demand-driven mission assignment. These lines have no
-#                   purpose in the original simulator.
-#
-# [BAND2-INDIRECT] — Code that already existed but whose behaviour is now
-#                    affected by Band 2 changes. No lines are deleted; instead,
-#                    the change is documented in an adjacent comment so the
-#                    original intent is preserved and the coupling is visible.
-#
-# Summary of changes:
-#
-#   __init__
-#     [BAND2-DIRECT]  Accept lambda_matrix (N×N, trips/min) and
-#                     vertiport_region_map (vertiport_id → region_id).
-#                     Store demand config: dt, rng, per-OD state.
-#
-#   reset()
-#     [BAND2-DIRECT]  Initialise per-episode demand state: departure queues,
-#                     trip log arrays, step-level counters.
-#     [BAND2-INDIRECT] _build_assets() now places vertiports whose region
-#                     assignments must be consistent with vertiport_region_map.
-#
-#   step()
-#     [BAND2-DIRECT]  (a) Poisson trip generation block — runs before mission
-#                         assignment each step; pushes trip requests into
-#                         per-vertiport departure queues.
-#                     (b) Mission assignment block — replaces random coin flip
-#                         (line 203 original) with queue-pop logic.
-#                     (c) Landing logging block — records arrive_airspace_step
-#                         and land_step; accumulates pads_occupied,
-#                         uavs_waiting, uavs_in_flight counters.
-#     [BAND2-INDIRECT] has_reached_end_vertiport() result now also triggers
-#                     arrive_airspace_step logging (vertiport arrival = airspace
-#                     arrival in current free-flight model).
-#
-#   get_episode_metrics()
-#     [BAND2-DIRECT]  New method. Aggregates all step-level logs into the
-#                     Group B observation features required by the RL
-#                     environment after each episode:
-#                     B1 pair_avg_trip_time, B2 pair_avg_wait_time,
-#                     B3 pair_demand_served_ratio, B4 utilization,
-#                     B5 queue_length, B6 fleet_utilization,
-#                     B7 demand_served_ratio.
-# =============================================================================
-#TODO: general TODO list and directives to follow when updating/editing code 
-# 1. remove [BAND2-DIRECT/INDIRECT] from docstring 
-# 2. do not change/update/edit parts of code that are not relevant - helps with diffing and understanding changes easily
-#  
-
 
 class SimulatorManagerVPDesign:
     '''Primary class that orchestrates and manages assets/data_classes,
       calculation, networking, collision handler for UAM simulator. '''
-    
-    def __init__(self, 
+
+    def __init__(self,
                  config: UAMConfig,
                  lambda_matrix: Optional[np.ndarray] = None,
                  vertiport_region_map: Optional[Dict[int, int]] = None):
@@ -80,22 +25,25 @@ class SimulatorManagerVPDesign:
 
         Args:
             config              : UAMConfig — all existing simulator config.
-            lambda_matrix       : [BAND2-DIRECT] np.ndarray of shape (N, N),
-                                  units trips/min. lambda_matrix[i][j] is the
-                                  Poisson rate for trip requests from region i
-                                  to region j. Diagonal must be 0 (no intra-
-                                  region demand). Produced by Band 1 pipeline
-                                  (band1_gmns_pipeline.py). If None, simulator
-                                  falls back to original random assignment.
-            
-            #TODO: check if this needs to be added as an attribute to vertiport object 
-            vertiport_region_map: [BAND2-DIRECT] Dict mapping vertiport_id
-                                  (int) to region_id (int, 0-indexed). Defines
-                                  which region each selected vertiport belongs
-                                  to. Must be consistent with the K-means
-                                  clustering used in Band 1. Built by the RL
-                                  environment when it selects vertiports (one
-                                  per region) and passes them to reset().
+            lambda_matrix       : np.ndarray of shape (N, N), units trips/min.
+                                  lambda_matrix[i][j] is the Poisson rate for
+                                  trip requests from region i to region j.
+                                  Diagonal must be 0 (no intra-region demand).
+                                  Produced by Band 1 pipeline. If None,
+                                  simulator falls back to original random
+                                  assignment.
+            vertiport_region_map: Dict mapping vertiport_id (int) to region_id
+                                  (int, 0-indexed). Defines which region each
+                                  selected vertiport belongs to. Must be
+                                  consistent with the K-means clustering used
+                                  in Band 1. Built by the RL environment when
+                                  it selects vertiports (one per region) and
+                                  passes them to reset().
+                                  Note: Vertiport.region already stores this
+                                  per vertiport; this dict mirrors it at the
+                                  manager level for fast lookup and is updated
+                                  each episode by the RL env via
+                                  update_vertiport_region_map().
         Returns:
             None
         '''
@@ -106,20 +54,20 @@ class SimulatorManagerVPDesign:
         # dt
         self.dt = self.config.simulator.dt
 
-        # [BAND2-DIRECT] Store OD demand matrix and vertiport→region mapping.
+        # Store OD demand matrix and vertiport→region mapping.
         # lambda_matrix: (N, N) trips/min. None → demand-unaware fallback.
         self.lambda_matrix = lambda_matrix
         # vertiport_region_map: {vertiport_id: region_id}. Built per episode
         # by the RL environment when it commits to a vertiport selection.
         self.vertiport_region_map = vertiport_region_map if vertiport_region_map is not None else {}
 
-        # [BAND2-DIRECT] Derive region count from lambda_matrix shape.
+        # Derive region count from lambda_matrix shape.
         # n_regions is 0 when no lambda_matrix is supplied (fallback mode).
         self.n_regions = lambda_matrix.shape[0] if lambda_matrix is not None else 0
 
-        # [BAND2-DIRECT] Seeded numpy RNG for Poisson draws — separate from
-        # Python's random module used by the rest of the simulator so that
-        # demand stochasticity is independently reproducible.
+        # Seeded numpy RNG for Poisson draws — separate from Python's random
+        # module used by the rest of the simulator so that demand stochasticity
+        # is independently reproducible.
         self._demand_rng = np.random.default_rng(self.seed)
 
         return None
@@ -223,75 +171,57 @@ class SimulatorManagerVPDesign:
         self.controller_module.register_uav_controllers()
         self.dynamics_module.register_uav_dynamics()
 
-        # [BAND2-DIRECT] Initialise all demand-side state for this episode.
+        # Initialise all demand-side state for this episode.
         # Called after _build_assets() so that vertiport_region_map is stable
         # and vertiport_list is populated.
         self._init_demand_state()
 
-        #! why do i need this 
-        # state 
+        #! why do i need this
+        # state
         self._state = SimulatorState(self.timestamp,
                                      self.currentstep,
-                                     self.airspace_state,  
+                                     self.airspace_state,
                                      self.atc_state,
                                      self.external_systems)
         return None
 
-    # [BAND2-DIRECT] ──────────────────────────────────────────────────────────
-    # _init_demand_state: sets up all per-episode mutable demand structures.
-    #
-    # Why here and not in __init__?
-    #   reset() is called at the start of every RL episode. All demand state
-    #   must be zeroed/cleared between episodes so that metrics from episode k
-    #   do not bleed into episode k+1. __init__ is called only once per
-    #   SimulatorManager lifetime.
-    #
-    # Structures initialised:
-    #   departure_queues   — one FIFO list per vertiport; each entry is a
-    #                        (dest_vertiport_id, enqueue_step) tuple.
-    #                        dest_vertiport_id: where the trip is going.
-    #                        enqueue_step: step at which the request arrived,
-    #                        used to detect and drop stale requests.
-    #   _trip_log          — list of dicts, one per COMPLETED trip; populated
-    #                        in step() when a UAV lands. Used by
-    #                        get_episode_metrics() to compute B1/B2/B3.
-    #   _demand_gen_od     — (N, N) int array counting trips GENERATED this
-    #                        episode per OD region pair. Denominator of B3.
-    #   _trips_completed_od— (N, N) int array counting trips COMPLETED.
-    #                        Numerator of B3.
-    #   _pads_occupied_sum — (n_vertiports,) float; running sum of
-    #                        pads_occupied at each step. Divided by total
-    #                        steps at end to give time-averaged utilisation B4.
-    #   _queue_length_sum  — (n_vertiports,) float; running sum of
-    #                        uavs_waiting at each step → B5.
-    #   _uavs_in_flight_sum— float; running sum of in-flight count → B6.
-    #   _step_count        — int; total steps taken this episode. Denominator
-    #                        for all time-averaged metrics.
-    # ─────────────────────────────────────────────────────────────────────────
     def _init_demand_state(self):
         '''Initialise per-episode demand tracking structures.
-        [BAND2-DIRECT] Called by reset() at the start of every episode.'''
+        Called by reset() at the start of every episode.
+
+        Structures initialised:
+          departure_queues    — one FIFO list per vertiport; each entry is a
+                               (dest_vertiport_id, enqueue_step) tuple.
+          _trip_log           — list of dicts, one per COMPLETED trip.
+          _demand_gen_od      — (N, N) int array counting trips GENERATED this
+                               episode per OD region pair. Denominator of B3.
+          _trips_completed_od — (N, N) int array counting trips COMPLETED.
+          _pads_occupied_sum  — (n_vp,) float; running sum of pads_occupied.
+          _queue_length_sum   — (n_vp,) float; running sum of uavs_waiting.
+          _uavs_in_flight_sum — int; running sum of in-flight count → B6.
+        Step count uses self._state.currentstep (set by step()).
+        '''
 
         n_vp = len(self.airspace.vertiport_list)
 
         # Departure queues: vertiport_id → list of (dest_vp_id, enqueue_step)
-        # [BAND2-DIRECT] Trips generated by the Poisson process are pushed
-        # here and popped when a UAV becomes available for a mission.
+        # Trips generated by the Poisson process are pushed here and popped
+        # when a UAV becomes available for a mission.
         self.departure_queues: Dict[int, List[Tuple[int, int]]] = {
             vp.id: [] for vp in self.airspace.vertiport_list
         }
 
         # Trip completion log: one dict per completed trip.
-        # [BAND2-DIRECT] Filled in step() when a UAV lands. Keys match the
-        # UrbanNav instrumentation spec in the MDP formulation §3.3.
+        # Filled in step() when a UAV lands. Keys match the UrbanNav
+        # instrumentation spec in the MDP formulation §3.3.
         self._trip_log: List[Dict] = []
 
         # OD trip counters at region level (N×N).
-        # [BAND2-DIRECT] Demand is defined at the region level (lambda_matrix
-        # is N×N). Vertiport-level trips are mapped back to region pairs for
-        # metric computation.
+        # Demand is defined at the region level (lambda_matrix is N×N).
+        # Vertiport-level trips are mapped back to region pairs for metric
+        # computation.
         if self.n_regions > 0:
-            self._demand_gen_od     = np.zeros((self.n_regions, self.n_regions), dtype=int)
+            self._demand_gen_od      = np.zeros((self.n_regions, self.n_regions), dtype=int)
             self._trips_completed_od = np.zeros((self.n_regions, self.n_regions), dtype=int)
         else:
             # Fallback: no OD matrix supplied — OD metrics will be empty.
@@ -299,22 +229,17 @@ class SimulatorManagerVPDesign:
             self._trips_completed_od = np.zeros((0, 0), dtype=int)
 
         # Step-level accumulators for time-averaged node features (B4, B5, B6).
-        # [BAND2-DIRECT] Indexed by position in airspace.vertiport_list, not
-        # by vertiport id, to keep numpy operations simple. The mapping
-        # vp_list_index → vertiport_id is stable within a single episode.
+        # Indexed by position in airspace.vertiport_list, not by vertiport id,
+        # to keep numpy operations simple. The mapping vp_list_index →
+        # vertiport_id is stable within a single episode.
         self._vp_index_to_id: List[int] = [vp.id for vp in self.airspace.vertiport_list]
+        
+        #TODO: remove once airspace has defined attr
+        self._vp_id_to_vp: Dict[int, Any] = {vp.id: vp for vp in self.airspace.vertiport_list}
         self._pads_occupied_sum  = np.zeros(n_vp, dtype=float)
         self._queue_length_sum   = np.zeros(n_vp, dtype=float)
-        
-        #TODO: this needs to be redefined as an int - UAV in flight will always be a whole number no need for float 
-        self._uavs_in_flight_sum = 0.0
-        
-        #TODO: can this step count use simulator current_step -> self._state.current_step
-        #TODO: current implementation of self._state.current_step matches self._step_count 
-        #TODO: - unless there is any special reason, change/update this to use self._state.current_step
-        self._step_count         = 0
-    
-    
+        # UAVs in flight is always a whole number; int avoids float accumulation.
+        self._uavs_in_flight_sum = 0
 
 
 
@@ -339,7 +264,7 @@ class SimulatorManagerVPDesign:
         # update: current_state.STEP
         self._state.currentstep += 1
 
-        # [BAND2-DIRECT] ── DEMAND GENERATION ────────────────────────────────
+        # ── DEMAND GENERATION ────────────────────────────────────────────────
         # Run Poisson trip generation before mission assignment so that trips
         # spawned this step are immediately eligible for dispatch this step.
         #
@@ -385,15 +310,16 @@ class SimulatorManagerVPDesign:
 
             #! How can the same uav_id leave and reach at the same time
             #* logic for has_reached_end_vertiport() changed so this makes sense
-            # [BAND2-INDIRECT] has_reached_end_vertiport() places the UAV into
-            # the vertiport landing queue. In the original simulator this was
-            # sufficient. Under Band 2, the UAV's arrival also triggers
-            # arrive_airspace_step logging inside _log_arrive_airspace() called
-            # immediately after, so the landing queue length at the moment of
-            # arrival (= wait time start) is captured before any pad is freed.
+            # has_reached_end_vertiport() places the UAV into the vertiport
+            # landing queue. The UAV's arrival also triggers arrive_airspace_step
+            # logging inside _log_arrive_airspace() called immediately after,
+            # so the landing queue length at the moment of arrival (= wait time
+            # start) is captured before any pad is freed.
             self.atc.has_reached_end_vertiport(uav_id)
-            # [BAND2-DIRECT] Log the step at which this UAV entered the
-            # landing queue (= arrived in the airspace above the vertiport).
+            # Log the step at which this UAV entered the landing queue
+            # (= arrived in the airspace above the vertiport).
+            # _log_arrive_airspace checks internally whether the UAV is now
+            # in a landing queue; it is a no-op if the UAV has not yet arrived.
             self._log_arrive_airspace(uav_id)
 
         for vertiport in self.airspace.vertiport_list:
@@ -401,28 +327,26 @@ class SimulatorManagerVPDesign:
                 for uav_id in vertiport.uav_id_list:
                     if not self.atc.uav_dict[uav_id].operational and not self.atc.uav_dict[uav_id].uav_in_flight:
 
-                        # [BAND2-DIRECT] ── DEMAND-DRIVEN MISSION ASSIGNMENT ──
+                        # ── DEMAND-DRIVEN MISSION ASSIGNMENT ──────────────────
                         # Original: new_mission = random.random() > 0.5
                         #   A coin flip with no awareness of demand. Replaced
                         #   entirely when an OD matrix is available.
                         #
-                        # Band 2 logic:
-                        #   1. Identify the region this vertiport belongs to
-                        #      (origin region o_region).
+                        # Demand-driven logic:
+                        #   1. Identify the region this vertiport belongs to.
                         #   2. Check the departure queue at this vertiport.
                         #   3. If the queue is non-empty, pop the front entry
                         #      (FIFO) and assign the UAV that mission.
                         #   4. If the queue is empty, the UAV waits.
                         #
                         # Why FIFO? Matches the queueing model in the MDP
-                        # formulation §3.3.1: the departure queue is a FIFO
-                        # buffer. Oldest requests are served first, which is
-                        # the standard M/M/c queue discipline.
+                        # formulation: oldest requests served first (standard
+                        # M/M/c queue discipline).
                         #
-                        # Fallback: if no lambda_matrix is provided (lambda_matrix
-                        # is None), retain original random assignment so the
-                        # rest of the simulator continues to function unchanged.
-                        # ─────────────────────────────────────────────────────
+                        # Fallback: if no lambda_matrix is provided, retain
+                        # original random assignment so the simulator runs
+                        # unchanged without a demand matrix.
+                        # ──────────────────────────────────────────────────────
                         if self.lambda_matrix is not None and self.vertiport_region_map:
                             queue = self.departure_queues.get(vertiport.id, [])
                             if queue:
@@ -432,8 +356,8 @@ class SimulatorManagerVPDesign:
                             else:
                                 self.atc.wait_at_vertiport(uav_id)
                         else:
-                            # [BAND2-INDIRECT] Original random assignment — kept
-                            # intact so the simulator runs without a lambda_matrix.
+                            # Original random assignment — kept intact so the
+                            # simulator runs without a lambda_matrix.
                             new_mission = random.random() > 0.5
                             if new_mission:
                                 self.atc.reassign_new_mission(uav_id)
@@ -443,14 +367,14 @@ class SimulatorManagerVPDesign:
             if vertiport.check_landing_space() and vertiport.get_landing_queue():
                 landing_uav_id = vertiport.landing_queue[0]
                 self.atc.landing_procedure(landing_uav_id)
-                # [BAND2-DIRECT] Log the step at which this UAV lands and
-                # record the completed trip in the OD counters.
+                # Log the step at which this UAV lands and record the
+                # completed trip in the OD counters.
                 self._log_land(landing_uav_id, vertiport.id)
 
-        # [BAND2-DIRECT] ── STEP-LEVEL METRIC ACCUMULATION ───────────────────
+        # ── STEP-LEVEL METRIC ACCUMULATION ───────────────────────────────────
         # Accumulate pad occupancy, queue lengths, and in-flight count at every
-        # step. Dividing by _step_count at episode end gives time-averaged
-        # values for B4 (utilization), B5 (queue_length), B6 (fleet_utilization).
+        # step. Dividing by step count at episode end gives time-averaged values
+        # for B4 (utilization), B5 (queue_length), B6 (fleet_utilization).
         # This must run at the end of each step after all state updates above.
         self._accumulate_step_metrics()
 
@@ -580,31 +504,30 @@ class SimulatorManagerVPDesign:
         return None
 
 
-
-    # [BAND2-DIRECT] ──────────────────────────────────────────────────────────
-    # _generate_demand: Poisson trip generation called once per step().
-    #
-    # For each OD region pair (i, j) with i ≠ j:
-    #   p_ij = lambda_matrix[i,j] * dt / 60   (Bernoulli probability)
-    #   Draw u ~ U(0,1); if u < p_ij: push a trip request into the departure
-    #   queue at the vertiport serving region i.
-    #
-    # Mapping from region → vertiport:
-    #   vertiport_region_map is {vp_id: region_id}. We invert it to get
-    #   {region_id: vp_id} — one vertiport per region (Level 1 constraint).
-    #   This inversion is cached in _region_to_vp after first call.
-    #
-    # Why a departure queue entry stores (dest_vp_id, enqueue_step):
-    #   dest_vp_id  : used by _dispatch_mission to set the UAV's target.
-    #   enqueue_step: used to compute wait time if we later add "request-drop"
-    #                 logic (max wait threshold). Currently stored but not used
-    #                 for dropping; it feeds potential Level 3 extensions.
-    # ─────────────────────────────────────────────────────────────────────────
     def _generate_demand(self):
         '''Poisson trip generation — runs once per step.
-        Pushes trip requests into vertiport departure queues.'''
+        Pushes trip requests into vertiport departure queues.
 
-        # Build region to vertiport lookup once per episode (stable after reset).
+        For each OD region pair (i, j) with i ≠ j:
+          p_ij = lambda_matrix[i,j] * dt / 60   (Bernoulli probability)
+          Draw u ~ U(0,1); if u < p_ij: push a trip request into the departure
+          queue at the vertiport serving region i.
+
+        Mapping from region → vertiport:
+          vertiport_region_map is {vp_id: region_id}. The RL environment
+          selects exactly one vertiport per region, so this map is already 1:1.
+          We invert it to get {region_id: vp_id} — one vertiport per region
+          (the Level 1 constraint). This inversion is cached in _region_to_vp
+          after the first call and is stable for the duration of the episode.
+
+        Why a departure queue entry stores (dest_vp_id, enqueue_step):
+          dest_vp_id  : used by _dispatch_mission to set the UAV's target.
+          enqueue_step: used to compute wait time. Currently stored but not
+                        used for request-dropping; feeds potential Level 3
+                        extensions.
+        '''
+
+        # Build region-to-vertiport lookup once per episode (stable after reset).
         if not hasattr(self, '_region_to_vp') or self._region_to_vp is None:
             self._region_to_vp: Dict[int, int] = {
                 region: vp_id
@@ -614,9 +537,11 @@ class SimulatorManagerVPDesign:
         dt_min = self.dt / 60.0   # convert simulator dt (seconds) to minutes
 
         for i in range(self.n_regions):
-            #TODO: logic does not make sense -
-            #each region has multiple vertiports, so how are we selecting specific vertiport
-            origin_vp_id = self._region_to_vp.get(i) #here we are selecting the first vertiport from a region
+            # vertiport_region_map has exactly one vertiport per region
+            # (the RL agent's selection for this episode). _region_to_vp is
+            # its inverse, so this lookup gives the single origin vertiport
+            # for region i.
+            origin_vp_id = self._region_to_vp.get(i)
             if origin_vp_id is None:
                 continue   # region i has no selected vertiport this episode
 
@@ -628,8 +553,8 @@ class SimulatorManagerVPDesign:
                 if dest_vp_id is None:
                     continue
 
-                # lambda <- lambda_matrix[i,j] 
-                # lambda is trips/min from i to j 
+                # lambda <- lambda_matrix[i,j]
+                # lambda is trips/min from i to j
                 rate = self.lambda_matrix[i, j]   # trips/min
                 if rate <= 0.0:
                     continue
@@ -645,56 +570,44 @@ class SimulatorManagerVPDesign:
                     # Increment region-level generated counter.
                     self._demand_gen_od[i, j] += 1
 
-    # [BAND2-DIRECT] ──────────────────────────────────────────────────────────
-    # _dispatch_mission: assign a queued trip to a UAV.
-    #
-    # Why a separate method?
-    #   Mission assignment in step() now needs three pieces of information that
-    #   did not exist before: 
-    #       the destination vertiport (from the queue), 
-    #       the step at which the trip was enqueued (for depart_step logging), 
-    #       and 
-    #       the OD region pair (for trip_log). 
-    #   Bundling this into one method keeps
-    #   step() readable and makes the logging contract explicit.
-    #
-    # What it writes to _trip_log:
-    #   Each entry is a dict with keys matching the UrbanNav instrumentation
-    #   spec (MDP formulation §3.3). Entries are completed (land_step,
-    #   arrive_airspace_step added) later by _log_arrive_airspace/_log_land.
-    #   The key used to correlate later updates is uav_id — one active trip
-    #   per UAV at a time (enforced by existing ATC assignment logic).
-    # ─────────────────────────────────────────────────────────────────────────
-    def _dispatch_mission(self, 
-                          uav_id: int, 
+    def _dispatch_mission(self,
+                          uav_id: int,
                           origin_vp_id: int,
-                          dest_vp_id: int, 
+                          dest_vp_id: int,
                           enqueue_step: int):
-        '''Assign a queued demand trip to an idle UAV and open
-        a trip log entry.
+        '''Assign a queued demand trip to an idle UAV and open a trip log entry.
 
         Args:
             uav_id        : id of the UAV being assigned the mission.
             origin_vp_id  : vertiport id where the UAV currently is.
             dest_vp_id    : vertiport id the UAV is flying to.
             enqueue_step  : simulator step when the trip request was generated.
+
+        What it writes to _trip_log:
+          Each entry is a dict with keys matching the UrbanNav instrumentation
+          spec (MDP formulation §3.3). Entries are completed (land_step,
+          arrive_airspace_step) later by _log_arrive_airspace/_log_land.
+          The key used to correlate later updates is uav_id — one active trip
+          per UAV at a time (enforced by existing ATC assignment logic).
+
+        TODO: replace with atc.assign_mission_to_target(uav_id, dest_vp_id)
+              once ATC exposes a targeted assignment API.
+              One aspect to address: origin_vp_id must match current_vp.
         '''
         # Set the UAV's destination and mark it operational via ATC.
-        # reassign_new_mission() is the existing ATC method for this.
-        # [BAND2-INDIRECT] reassign_new_mission() in its original form picks
-        # a random destination. Under Band 2 we need to direct it to a
-        # specific dest_vp_id. If ATC exposes a targeted assignment method
-        # use that; otherwise call the general method here and note that
-        # ATC-level targeting is a future task.
-        #
-        # TODO: replace with atc.assign_mission_to_target(uav_id, dest_vp_id)
-        #       once ATC exposes a targeted assignment API.
-        #       one aspect has to be addressed, the origin_vp_id needs to match current_vp 
+        # reassign_new_mission() in its original form picks a random destination.
+        # A targeted assignment API (assign_mission_to_target) is a future task.
+        #!remove 
         self.atc.reassign_new_mission(uav_id)
 
         # Resolve region pair for this trip.
         o_region = self.vertiport_region_map.get(origin_vp_id, -1)
         d_region = self.vertiport_region_map.get(dest_vp_id, -1)
+        #* new - accomplishes atc.assign_mission_to_target() - check atc, assign_mission_start_end_vertiport existed, so no need for new method
+        # temp-check - remove once logic is confirmed
+        _uav = self.atc.uav_dict[uav_id]
+        assert _uav.end_vertiport == self._vp_id_to_vp[origin_vp_id]
+        self.atc.assign_mission_start_end_vertiport(uav_id=uav_id, start=self._vp_id_to_vp[origin_vp_id], end=self._vp_id_to_vp[dest_vp_id])
 
         # Open a trip log entry; arrive_airspace_step and land_step are
         # filled in by _log_arrive_airspace() and _log_land() respectively.
@@ -710,34 +623,28 @@ class SimulatorManagerVPDesign:
             'land_step'           : None,   # filled by _log_land
         })
 
-    # [BAND2-DIRECT] ──────────────────────────────────────────────────────────
-    # _log_arrive_airspace: record when a UAV enters the landing queue.
-    #
-    # In the current free-flight UrbanNav model there is no explicit "airspace
-    # above vertiport" zone — has_reached_end_vertiport() transitions the UAV
-    # directly into the landing queue. Therefore, arrive_airspace_step =
-    # land_step when there is no queue, and arrive_airspace_step < land_step
-    # when the UAV must wait. We record arrive_airspace_step at the moment the
-    # UAV joins the landing queue (after has_reached_end_vertiport returns),
-    # and land_step when landing_procedure completes.
-    #
-    # Matching UAV to trip log entry: by uav_id, using the most recent open
-    # entry (land_step is None). One active trip per UAV at a time.
-    # ─────────────────────────────────────────────────────────────────────────
     def _log_arrive_airspace(self, uav_id: int):
-        #TODO: this function name and operation is mis-leading 
-        #log_arrive_airspace means - we have already ensured the UAV has arrived in airspace somehow, 
-        #and now we are only logging that behavior - so the check for vertiport arrival needs to be performed in step(), 
-        #if arrived then trigger this function 
-        '''[BAND2-DIRECT] Log the step at which uav_id entered the landing
-        queue. Fills arrive_airspace_step in the open trip log entry.'''
-        #TODO: quick check, if a UAV has collided, is it removed from the simulation 
-        #TODO: this check for UAV is None is redundant - give reason if not 
+        '''Log the step at which uav_id entered the landing queue.
+
+        Checks internally whether the UAV is currently in a landing queue;
+        this is a no-op if the UAV has not yet reached its destination vertiport.
+        Fills arrive_airspace_step in the open trip log entry for uav_id.
+
+        In the current free-flight model, has_reached_end_vertiport() places
+        the UAV directly into the landing queue. Therefore arrive_airspace_step
+        equals land_step when there is no queue, and arrive_airspace_step <
+        land_step when the UAV must wait for a free pad.
+
+        Note on the None guard below: uav_id comes from iterating
+        self.atc.uav_dict.keys() in step(), so the UAV should always be
+        present. The guard is retained as a safety net against edge cases
+        where has_left_start_vertiport() or has_reached_end_vertiport() might
+        modify the dict during iteration.
+        '''
         uav = self.atc.uav_dict.get(uav_id)
         if uav is None:
             return
         # Only log if the UAV is now in a landing queue (not still in flight).
-        # Check by inspecting landing_queue of all vertiports.
         for vertiport in self.airspace.vertiport_list:
             if uav_id in vertiport.landing_queue:
                 # Find the most recent open log entry for this UAV.
@@ -746,21 +653,19 @@ class SimulatorManagerVPDesign:
                         entry['arrive_airspace_step'] = self._state.currentstep
                 break
 
-    # [BAND2-DIRECT] ──────────────────────────────────────────────────────────
-    # _log_land: record when a UAV completes landing and update OD counters.
-    #
-    # Called immediately after landing_procedure() in step(). At this point
-    # the UAV has physically landed and its trip is complete. We:
-    #   1. Fill land_step in the matching trip log entry.
-    #   2. Increment _trips_completed_od[o_region, d_region].
-    #
-    # If arrive_airspace_step was never set (UAV landed without queuing),
-    # we backfill it with land_step so that wait_time = 0 for that trip.
-    # ─────────────────────────────────────────────────────────────────────────
-    def _log_land(self, 
-                  uav_id: int, 
+    def _log_land(self,
+                  uav_id: int,
                   vertiport_id: int):
-        '''Record completed landing and increment OD counters.'''
+        '''Record completed landing and increment OD counters.
+
+        Called immediately after landing_procedure() in step(). At this point
+        the UAV has physically landed and its trip is complete:
+          1. Fills land_step in the matching trip log entry.
+          2. Increments _trips_completed_od[o_region, d_region].
+
+        If arrive_airspace_step was never set (UAV landed without queuing),
+        backfills it with land_step so that wait_time = 0 for that trip.
+        '''
         for entry in reversed(self._trip_log):
             if entry['uav_id'] == uav_id and entry['land_step'] is None:
                 entry['land_step'] = self._state.currentstep
@@ -774,39 +679,29 @@ class SimulatorManagerVPDesign:
                     self._trips_completed_od[o, d] += 1
                 break
 
-    # [BAND2-DIRECT] ──────────────────────────────────────────────────────────
-    # _accumulate_step_metrics: update running sums each step for B4/B5/B6.
-    #
-    # Why running sums instead of storing per-step arrays?
-    #   Per-step arrays for large episodes (36,000 steps × N vertiports) would
-    #   consume significant memory. Running sums give identical time-averaged
-    #   results at O(N) memory cost per step.
-    #
-    # pads_occupied[k]: number of UAVs currently landed at vertiport k.
-    #   Computed as len(vertiport.uav_id_list) — UAVs in uav_id_list are those
-    #   on the ground (not in-flight, not in landing queue).
-    # uavs_waiting[k]: len(vertiport.landing_queue) — UAVs hovering waiting
-    #   for a free pad.
-    # uavs_in_flight: count of UAVs where uav.uav_in_flight is True.
-    # ─────────────────────────────────────────────────────────────────────────
     def _accumulate_step_metrics(self):
-        '''[BAND2-DIRECT] Accumulate step-level values for time-averaged
-        metrics B4 (utilization), B5 (queue_length), B6 (fleet_utilization).'''
-        #TODO: is there any good reason why we should have a separate step_count for logging VP design metrics,
-        #      There already exists step count -> self._state.current_step
-        #      If there is reason for keeping separate step_count provide reason   
-        self._step_count += 1 
+        '''Accumulate step-level values for time-averaged metrics
+        B4 (utilization), B5 (queue_length), B6 (fleet_utilization).
+
+        pads_occupied[k]: number of UAVs currently landed at vertiport k.
+          Computed as len(vertiport.uav_id_list) — UAVs in uav_id_list are
+          those on the ground (not in-flight, not in landing queue).
+        uavs_waiting[k]: len(vertiport.landing_queue) — UAVs hovering waiting
+          for a free pad.
+        uavs_in_flight: count of UAVs where uav.uav_in_flight is True.
+
+        Step count is read from self._state.currentstep (incremented at the
+        start of step() before this method is called).
+        '''
         for k, vp_id in enumerate(self._vp_index_to_id):
             vertiport = next(
                 (vp for vp in self.airspace.vertiport_list if vp.id == vp_id), None
                             )
             if vertiport is None:
                 continue
-            self._pads_occupied_sum[k]  += len(vertiport.uav_id_list)
-            self._queue_length_sum[k]   += len(vertiport.get_landing_queue()
-                                               #TODO: remove redundant conditional - provide vertiport script to Claude 
-                                               if hasattr(vertiport, 'get_landing_queue') #! it exists but not as an attr, its a function of vertiport that returns vertiport.landing_queue
-                                               else vertiport.landing_queue)
+            self._pads_occupied_sum[k] += len(vertiport.uav_id_list)
+            # get_landing_queue() is a method on Vertiport that returns landing_queue.
+            self._queue_length_sum[k]  += len(vertiport.get_landing_queue())
 
         in_flight = sum(
             1 for uav in self.atc.uav_dict.values()
@@ -814,36 +709,9 @@ class SimulatorManagerVPDesign:
         )
         self._uavs_in_flight_sum += in_flight
 
-    # [BAND2-DIRECT] ──────────────────────────────────────────────────────────
-    # get_episode_metrics: compute all Group B observation features after an
-    # episode ends. Called by the RL environment wrapper.
-    #
-    # Returns a dict whose keys exactly match the UrbanNav instrumentation spec
-    # and the UrbanNavEnv.reset() return contract (MDP formulation §5).
-    #
-    # Metric derivations:
-    #   B1 pair_avg_trip_time[i,j]:
-    #     Mean of (land_step - depart_step) * dt for completed trips on (i,j).
-    #     Fallback: theoretical minimum d_ij / v_max if no trips completed.
-    #     (Fallback value not computed here — RL env handles it using geometry.)
-    #   B2 pair_avg_wait_time[i,j]:
-    #     Mean of (land_step - arrive_airspace_step) * dt for completed trips.
-    #   B3 pair_demand_served_ratio[i,j]:
-    #     trips_completed_od[i,j] / demand_gen_od[i,j].
-    #     Set to 1.0 when demand_gen_od[i,j] == 0 (no demand → no failure).
-    #   B4 utilization[k]:
-    #     pads_occupied_sum[k] / (step_count * pad_capacity).
-    #     pad_capacity from config.
-    #   B5 queue_length[k]:
-    #     queue_length_sum[k] / step_count.
-    #   B6 fleet_utilization:
-    #     uavs_in_flight_sum / (step_count * total_uavs).
-    #   B7 demand_served_ratio:
-    #     sum(trips_completed_od) / sum(demand_gen_od).
-    # ─────────────────────────────────────────────────────────────────────────
     def get_episode_metrics(self) -> Dict:
-        '''[BAND2-DIRECT] Aggregate all step-level logs into Group B
-        observation features for the RL environment.
+        '''Aggregate all step-level logs into Group B observation features
+        for the RL environment. Call after an episode ends.
 
         Returns:
             dict with keys:
@@ -857,15 +725,32 @@ class SimulatorManagerVPDesign:
                 fleet_utilization       : float ratio [0, 1]
                 demand_served_ratio     : float ratio [0, 1]
                 vp_index_to_id          : list[int]  vertiport id per index k
+
+        Metric derivations:
+          B1 pair_avg_trip_time[i,j]:
+            Mean of (land_step - depart_step) * dt for completed trips on (i,j).
+          B2 pair_avg_wait_time[i,j]:
+            Mean of (land_step - arrive_airspace_step) * dt.
+          B3 pair_demand_served_ratio[i,j]:
+            trips_completed_od[i,j] / demand_gen_od[i,j].
+            Set to 1.0 when demand_gen_od[i,j] == 0.
+          B4 utilization[k]:
+            pads_occupied_sum[k] / (step_count * pad_capacity).
+          B5 queue_length[k]:
+            queue_length_sum[k] / step_count.
+          B6 fleet_utilization:
+            uavs_in_flight_sum / (step_count * total_uavs).
+          B7 demand_served_ratio:
+            sum(trips_completed_od) / sum(demand_gen_od).
         '''
         N   = self.n_regions
-        
-        #TODO: why is this variable not used - why was this created in the first place - 
-        #TODO: do not remove - provide reasoning for existence 
+        # n_vp documents the number of active vertiports this episode.
+        # Available for shape assertions: utilization.shape == (n_vp,),
+        # queue_length.shape == (n_vp,). Retained for clarity and extension.
         n_vp = len(self._vp_index_to_id)
-        
-        #TODO: _step_count to self._state.current_step
-        T   = max(self._step_count, 1)   # guard against division by zero
+        # Use self._state.currentstep as the step count — it is incremented at
+        # the start of each step() call and matches the number of steps taken.
+        T   = max(self._state.currentstep, 1)   # guard against division by zero
 
         # ── B1 / B2 / B3: per-OD-pair metrics from trip log ──────────────────
         trip_time_sum   = np.zeros((N, N), dtype=float)
@@ -878,11 +763,11 @@ class SimulatorManagerVPDesign:
                 continue
             if entry['land_step'] is None:
                 continue   # trip not completed — skip (counts as unserved)
-            
+
             # total trip time(start VP to end VP + wait_time at end VP)
             trip_steps = entry['land_step'] - entry['depart_step']
-            
-            # wait time before landing at end VP 
+
+            # wait time before landing at end VP
             wait_steps = entry['land_step'] - entry['arrive_airspace_step']
 
             trip_time_sum[o, d]   += trip_steps * self.dt   # seconds
@@ -893,15 +778,15 @@ class SimulatorManagerVPDesign:
         pair_avg_trip_time = np.where(
             completed_count > 0,
             trip_time_sum / np.maximum(completed_count, 1),
-            #Research_Question: should 'condition y' be set to 0, or a very high number like 999_999 to indicate non-completion of trip 
-            0.0   # 0 flags "no completed trips" for RL env fallback 
+            #Research_Question: should 'condition y' be set to 0, or a very high number like 999_999 to indicate non-completion of trip
+            0.0   # 0 flags "no completed trips" for RL env fallback
         )
 
         # B2: pair_avg_wait_time — mean pad wait per OD pair
         pair_avg_wait_time = np.where(
             completed_count > 0,
             wait_time_sum / np.maximum(completed_count, 1),
-            #Research_Question: should 'condition y' be set to 0, or a very high number like 999_999 to indicate non-completion of trip             
+            #Research_Question: should 'condition y' be set to 0, or a very high number like 999_999 to indicate non-completion of trip
             0.0
         )
 
@@ -909,7 +794,7 @@ class SimulatorManagerVPDesign:
         pair_demand_served_ratio = np.where(
             self._demand_gen_od > 0,
             self._trips_completed_od / np.maximum(self._demand_gen_od, 1),
-            #Research_Question: should 'condition y' be set to 0, or a very high number like 999_999 to indicate non-completion of trip                         
+            #Research_Question: should 'condition y' be set to 0, or a very high number like 999_999 to indicate non-completion of trip
             1.0   # no demand on this pair → define as fully served
         )
 
@@ -945,21 +830,14 @@ class SimulatorManagerVPDesign:
             'vp_index_to_id'           : list(self._vp_index_to_id),
         }
 
-    # [BAND2-DIRECT] ──────────────────────────────────────────────────────────
-    # update_vertiport_region_map: allow the RL environment to update the
-    # vertiport→region mapping between episodes without constructing a new
-    # SimulatorManager.
-    #
-    # Why needed?
-    #   The RL agent selects a new action (different vertiports) at each MDP
-    #   step. The RL env wrapper calls reset() with the new vertiport
-    #   selection. The vertiport_region_map changes each episode because
-    #   different candidates may be selected. This method provides a clean
-    #   entry point for that update before reset() is called.
-    # ─────────────────────────────────────────────────────────────────────────
     def update_vertiport_region_map(self, vertiport_region_map: Dict[int, int]):
-        '''[BAND2-DIRECT] Update the vertiport→region mapping for the next
-        episode. Call before reset().
+        '''Update the vertiport→region mapping for the next episode.
+        Call before reset().
+
+        The RL agent selects a new action (different vertiports) at each MDP
+        step. The vertiport_region_map changes each episode because different
+        candidates may be selected. This method provides a clean entry point
+        for that update before reset() is called.
 
         Args:
             vertiport_region_map: {vertiport_id: region_id}
@@ -969,21 +847,21 @@ class SimulatorManagerVPDesign:
         # rebuilds it on the first step of the new episode.
         self._region_to_vp = None
 
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
+
+
+
+
+
+
+
     # do we directly add the command to the UAV
-    # OR do collect these external commands and then combine with internal commands and dispatch at the same time 
+    # OR do collect these external commands and then combine with internal commands and dispatch at the same time
     # def dispatch_commands(self, commands: UAVCommandBundle):
     #     for uav_id, cmd_list in commands.items():
     #         for cmd in cmd_list:
