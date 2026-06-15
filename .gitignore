@@ -9,3 +9,5 @@ logs
 renders
 *.csv
 *.png
+/Austin_GEOID_data
+/band1_*
