@@ -522,7 +522,7 @@ if __name__ == '__main__':
     # print(airspace.get_random_vertiport_from_region(4))
     # print('Vertiports in airspace: ', airspace.get_vertiport_list())
     print('airspace.location_utm_gdf.geometry.iloc[0]: \n')
-    print(airspace.location_utm_gdf.geometry.iloc[0].shape)
+    print(airspace.location_utm_gdf.geometry.iloc[0])
 
 
 
