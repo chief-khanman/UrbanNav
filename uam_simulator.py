@@ -34,17 +34,37 @@ class UAMSimulator:
         # Pass the freshly-built airspace to the renderer so it can draw the map
         self.renderer.reset(self.simulator_manager.airspace)
         self.logger.reset()
+
+        # ---- log zero-th step ---- # 
+        #TODO: call simulator_manager.get_state()
+        #      pass state to log_step()
         self.logger.log_step()
+
         
 
 
     def step(self, commands: UAVCommandBundle):
         current_state = self.simulator_manager.get_state()
+        #TODO: change simulator_manager.step() to return None
+        #TODO: create get functions for returning and capturing necessary outputs 
         collisions = self.simulator_manager.step(commands)
+        #TODO: place collisions
+        # collisions = self.simulator_manager.get_collisions()
+        # current_state = self.simulator_manager.get_state()
+        # sim_data = {'current_state':current_state, 
+        #             'collisions':collisions, 
+        #              kwargs ...
+        #             }
+        #TODO: let logger and renderer decide what to do with the data
+        #      this way sim_data can contain multiple things and loggers and renderers use what they need 
+        # self.logger.log_step(sim_data)
+        # self.renderer.render_step(sim_data)
+
         self.logger.log_step(current_state, collisions=collisions)
         # Snapshot / draw current step (no-op when rendering.enabled=false)
+        #TODO: definition of render_step to follow above reccomendation 
         self.renderer.render_step(
-            self.simulator_manager.atc.uav_dict,
+            self.simulator_manager.atc.uav_dict, 
             self.simulator_manager._state.currentstep,
         )
         return collisions
