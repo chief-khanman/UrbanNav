@@ -71,6 +71,9 @@ class AerBus:
         # RL UAVs: actions come from gym via external_actions, skip in get_actions()
         self.rl_uav_ids: Set[int] = set()
 
+        # mode
+        self.mode:str = mode
+
     # ------------------------------------------------------------------
     # Registration
     # ------------------------------------------------------------------
