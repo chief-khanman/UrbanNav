@@ -8,7 +8,7 @@ Run in isolation:
     pytest tests/test_init.py -v
 """
 import pytest
-from component_schema import UAMConfig, build_fleet
+from component_schema import UAMConfig, build_fleet_blueprint
 
 
 # ── Config ──────────────────────────────────────────────────────────────────
@@ -35,9 +35,9 @@ class TestConfigLoads:
         total = sum(e.count for e in config.fleet_composition)
         assert total == 5
 
-    def test_build_fleet_produces_blueprints(self, config_path):
+    def test_build_fleet_blueprint_produces_blueprints(self, config_path):
         config = UAMConfig.load_from_yaml(config_path)
-        blueprints = build_fleet(config)
+        blueprints = build_fleet_blueprint(config)
         total = sum(e.count for e in config.fleet_composition)
         assert len(blueprints) == total
 
