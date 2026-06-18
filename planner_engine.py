@@ -82,7 +82,7 @@ class PlannerEngine:
                     instance.dt = self.dt   # sync simulator dt for time-aware planners
                 self.plan_obj_map[uav_id] = instance
 
-    #TODO: get_plans() will need to be updated - return should not be List[Points], return should be List[Tuple[Point|float]]
+    #TODO: get_plans() will need to be updated - return should not be List[Points], return should be List[Tuple]
     #TODO:  because get_plans will include not just position, it can also include, pitch,roll, yaw, vx,vy,vz, and ddot_pitch, ddot_roll, ddot_yaw
     def get_plans(self) -> Dict[int, List[Point]]:
         """Retrieve the current target waypoint for every UAV with a registered planner.
