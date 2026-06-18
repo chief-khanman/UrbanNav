@@ -291,7 +291,7 @@ class UAVBlueprint:
 
 
 #TODO: this function needs to be placed in simulator_manager OR atc - later update
-def build_fleet(config: UAMConfig) -> List[UAVBlueprint]:
+def build_fleet_blueprint(config: UAMConfig) -> List[UAVBlueprint]:
     """
     Iterate over fleet_composition and produce one UAVBlueprint per UAV instance.
 
