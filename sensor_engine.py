@@ -79,13 +79,11 @@ class SensorEngine:
                     f"Implemented: {sorted(SENSOR_CLASS_MAP)}"
                 )
             
-            # get the uav_list that maps to specific sensor
-            uav_list = self.sensor_uav_map[sensor_name]
-            # since all uavs in uav list are same get any uav and
-            # its radius for spacing 
-            spacing = 2 * self.uav_dict[uav_list[0]].radius # following implementation of M Muller
-            
-            instance = SENSOR_CLASS_MAP[sensor_name](spacing)
+            # Spacing is left as None: PartialSensor.update() lazily computes it
+            # as max(detection_radius) across the fleet on the first step, which
+            # bounds each broad-phase query to ~3x3x3 cells (see PartialSensor
+            # docstring), instead of sizing cells off UAV body radius (~30x30x30 cells).
+            instance = SENSOR_CLASS_MAP[sensor_name]()
             # Inject restricted area geometry if available
             if self.airspace is not None:
                 ra_data = getattr(self.airspace, 'restricted_airspace_geo_series', None)

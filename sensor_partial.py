@@ -55,6 +55,17 @@ class PartialSensor(Sensor):
         self._ra_polygons: dict = {}          # int_id -> shapely Polygon (actual boundary)
         self._ra_polygon_buffers: dict = {}   # int_id -> shapely Polygon (buffered detection zone)
 
+        # Per-step memoization: get_nmac() chains through get_uav_detection(),
+        # and get_uav_collision() chains through get_nmac() (-> get_uav_detection()).
+        # Caching each uav_id's result avoids recomputing the same broad+narrow
+        # phase work multiple times within one step. Cleared in update(), which
+        # SensorEngine guarantees runs exactly once per step per shared instance.
+        self._detection_cache: Dict[int, set] = {}
+        self._nmac_cache: Dict[int, set] = {}
+        self._collision_cache: Dict[int, set] = {}
+        self._ra_detection_cache: Dict[int, set] = {}
+        self._ra_collision_cache: Dict[int, set] = {}
+
     # ------------------------------------------------------------------
     # RA data injection (called once by SensorEngine at startup)
     # ------------------------------------------------------------------
@@ -104,6 +115,11 @@ class PartialSensor(Sensor):
             uav_dict: Mapping uav_id (int) -> UAV instance from ATC.
         """
         self._uav_dict = uav_dict
+        self._detection_cache.clear()
+        self._nmac_cache.clear()
+        self._collision_cache.clear()
+        self._ra_detection_cache.clear()
+        self._ra_collision_cache.clear()
 
         if not uav_dict:
             return
@@ -144,14 +160,17 @@ class PartialSensor(Sensor):
             List of detected UAV IDs (excludes uav_id itself).
         """
 
+        if uav_id in self._detection_cache:
+            return self._detection_cache[uav_id]
+
         uav = self._uav_dict[uav_id]
         candidates = self._spatial_hash.query(
             (uav.px, uav.py, uav.pz), uav.detection_radius
         )
 
         detected: set[int] = set()
-        
-        # if UAV sensors are active fill the detected list 
+
+        # if UAV sensors are active fill the detected list
         if uav.get_sensor_operational():
             for candidate_id in candidates:
                 if candidate_id == uav_id:
@@ -165,7 +184,8 @@ class PartialSensor(Sensor):
                     detected.add(candidate_id)
         else:
             detected = set()
-        
+
+        self._detection_cache[uav_id] = detected
         return detected
 
     def get_nmac(self, uav_id: int) -> set[int]:
@@ -180,16 +200,21 @@ class PartialSensor(Sensor):
         Returns:
             List of UAV IDs in NMAC range (subset of detected).
         """
+        if uav_id in self._nmac_cache:
+            return self._nmac_cache[uav_id]
+
         uav = self._uav_dict[uav_id]
         detected_ids = self.get_uav_detection(uav_id)
 
-        nmac: set[int] = set() 
+        nmac: set[int] = set()
         for other_id in detected_ids:
             other = self._uav_dict[other_id]
             dist = _euclidean_3d(uav.px, uav.py, uav.pz,
                                   other.px, other.py, other.pz)
             if dist <= uav.nmac_radius:
                 nmac.add(other_id)
+
+        self._nmac_cache[uav_id] = nmac
         return nmac
 
     def get_uav_collision(self, uav_id: int) -> set[int]:
@@ -204,6 +229,9 @@ class PartialSensor(Sensor):
         Returns:
             List of colliding UAV IDs (subset of NMAC).
         """
+        if uav_id in self._collision_cache:
+            return self._collision_cache[uav_id]
+
         uav = self._uav_dict[uav_id]
         nmac_ids = self.get_nmac(uav_id)
 
@@ -214,6 +242,8 @@ class PartialSensor(Sensor):
                                   other.px, other.py, other.pz)
             if dist <= (uav.radius + other.radius):
                 collisions.add(other_id)
+
+        self._collision_cache[uav_id] = collisions
         return collisions
 
     # ------------------------------------------------------------------
@@ -233,19 +263,27 @@ class PartialSensor(Sensor):
         Returns:
             Set of integer RA IDs (subset of pre-processed _ra_polygon_buffers).
         """
+        #! As of June 18 - Restricted Area is still using 2D - we do not have building heights yet, once we do we will update this method
         if self._ra_geo_series is None or self._ra_spatial_hash is None:
             return set()
+
+        if uav_id in self._ra_detection_cache:
+            return self._ra_detection_cache[uav_id]
 
         uav = self._uav_dict[uav_id]
 
         if not uav.get_sensor_operational():
-            return set()
+            detected_ra: set[int] = set()
+            self._ra_detection_cache[uav_id] = detected_ra
+            return detected_ra
 
         # Broad phase: query RA hash in 2D (z=0 for ground-level RA centroids)
+        #TODO: we need to resolve for 2D or 3D
         candidates = self._ra_spatial_hash.query(
-            (uav.px, uav.py, 0.0), uav.detection_radius
+            (uav.px, uav.py, 0.0), uav.detection_radius #! Z-COORD is set to 0 for restricted area ONLY
         )
 
+        #TODO: 3D calculation missing
         uav_detection_circle = Point(uav.px, uav.py).buffer(uav.detection_radius)
 
         detected_ra: set[int] = set()
@@ -256,6 +294,7 @@ class PartialSensor(Sensor):
             if uav_detection_circle.intersects(ra_buf_poly):
                 detected_ra.add(ra_id)
 
+        self._ra_detection_cache[uav_id] = detected_ra
         return detected_ra
 
     def get_ra_collision(self, uav_id: int) -> set[int]:
@@ -273,6 +312,9 @@ class PartialSensor(Sensor):
         if self._ra_geo_series is None or self._ra_spatial_hash is None:
             return set()
 
+        if uav_id in self._ra_collision_cache:
+            return self._ra_collision_cache[uav_id]
+
         detected_ra_ids = self.get_ra_detection(uav_id)
         uav = self._uav_dict[uav_id]
         uav_body_circle = Point(uav.px, uav.py).buffer(uav.radius)
@@ -285,6 +327,7 @@ class PartialSensor(Sensor):
             if uav_body_circle.intersects(ra_poly):
                 collisions_ra.add(ra_id)
 
+        self._ra_collision_cache[uav_id] = collisions_ra
         return collisions_ra
 
     def _turn_off_landing_sensor(self, uav_id):
