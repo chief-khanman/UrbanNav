@@ -8,7 +8,7 @@ from sensor_engine import SensorEngine
 from planner_engine import PlannerEngine
 from aer_bus import AerBus
 from dynamics_engine import DynamicsEngine
-from component_schema import UAVCommandBundle, ActionType, SimulatorState, build_fleet
+from component_schema import UAVCommandBundle, ActionType, SimulatorState, build_fleet_blueprint
 from component_schema import RESERVED_TYPE_LEARNING
 
 class SimulatorManager:
@@ -42,7 +42,8 @@ class SimulatorManager:
                             )
     
     def _init_atc(self):
-        return ATC(self.airspace, self.seed)
+        return ATC(airspace=self.airspace, 
+                   seed=self.seed)
 
     def _initiate_simulator_assets(self,):
 
@@ -64,24 +65,33 @@ class SimulatorManager:
         
         ### sensor ###
         # collision_detector for COLLISION DETECTION/RESOLUTION
-        self.sensor_module = SensorEngine(self.config, self.atc.sensor_map, self.atc.uav_dict,
+        self.sensor_module = SensorEngine(self.config, 
+                                          self.atc.sensor_map, 
+                                          self.atc.uav_dict,
                                           airspace=self.airspace)
         
         # use config to send data to statemanager 
         ### Planner ###
-        self.planner_module = PlannerEngine(self.config, self.atc.planner_map, self.atc.uav_dict)
+        self.planner_module = PlannerEngine(self.config, 
+                                            self.atc.planner_map, 
+                                            self.atc.uav_dict)
         
         ### Controller ###
         # AER_BUS handles state export and action import
         # AER_BUS for NETWORKING 
         #! should controller take in plan
-        self.controller_module = AerBus(self.config, self.atc.controller_map, self.atc.uav_dict, mode='deployment') #! should I pass the CONFIG 
+        self.controller_module = AerBus(self.config, 
+                                        self.atc.controller_map, 
+                                        self.atc.uav_dict, 
+                                        mode='deployment')
         
         ### Physics/Dynamics ###
         # Dynamics_Engine for PHYSICS CALCULATION 
         # make dynamics engine handle different kind/form of dynamics
         #! should dynamics take in controller_action 
-        self.dynamics_module = DynamicsEngine(self.config, self.atc.dynamics_map, self.atc.uav_dict) 
+        self.dynamics_module = DynamicsEngine(self.config, 
+                                              self.atc.dynamics_map, 
+                                              self.atc.uav_dict) 
           
     #! NEED to rework this function 
     def _build_assets(self,):
@@ -89,6 +99,10 @@ class SimulatorManager:
         # create vertiports
         num_vp = self.config.airspace.number_of_vertiports 
         # change this method to build vertiports in different ways 
+        #TODO: update this method, depending on CONFIG - 
+        # this method should 
+        # 1. build random VP 
+        # 2. use zone/region info 
         self.airspace.add_n_random_vps_to_vplist(num_vertiports=num_vp)
         
         ## ----> VP_LIST <---- ##
@@ -100,7 +114,7 @@ class SimulatorManager:
         self.sim_vp_id_list = self.airspace.get_vp_id_list()
         
         #### ----------- UAV ----------- ####
-        self.uav_blueprints = build_fleet(self.config) # num_uav comes from total in fleet composition 
+        self.uav_blueprints = build_fleet_blueprint(self.config) # num_uav comes from total in fleet composition 
         # create uavs
         # use these uav_blueprints and build uavs using uav_template OR method from atc that builds UAVs from UAV blueprints
         self.atc.create_uavS_from_blueprint(self.uav_blueprints) 
@@ -310,6 +324,8 @@ class SimulatorManager:
         self.dynamics_module.step(actions_dict=updated_control_actions_dict)
 
         ### CHECK COLLISION ###
+        #TODO: run get_collision once - from collision operation stream out detection, nmac, and collision
+        # collision runs nmac which runs detection, so running these three means I am running detection 3 times, nmac twice and collsion once
         detection_dict_restricted_area = self.sensor_module.get_detection_restricted_area() # <- pass uav_id_list
         detection_dict_uavS = self.sensor_module.get_detection_other_uavS()
         nmac_dict = self.sensor_module.get_nmac()
