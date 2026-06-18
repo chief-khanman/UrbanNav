@@ -177,6 +177,9 @@ class UAV_template(ABC):
         # UAV global vector state - for rendering position of UAV 
         self.px:float = self.current_position.x
         self.py:float = self.current_position.y
+        
+        #### -------- Z COORDINATE --------- ####
+        #TODO: 
         self.pz:float = self.current_position.z if self.current_position.has_z else 0.0
 
         # NED is simply the modified current location
@@ -184,10 +187,14 @@ class UAV_template(ABC):
         # NED frame helps simplify the calculations - thats all
         self.n:float = self.current_position.x # subtract airspace mid-point coord
         self.e:float = self.current_position.y
+
+        #### -------- Z COORDINATE --------- ####
         self.d:float = self.current_position.z if self.current_position.has_z else 0.0
 
         self.vx:float = 0.0
         self.vy:float = 0.0
+
+        #### -------- Z COORDINATE --------- ####
         self.vz:float = 0.0
         
         self.pitch:float = 0.0
@@ -197,7 +204,7 @@ class UAV_template(ABC):
         self.pitch_dot:float = 0.0
         self.roll_dot:float = 0.0
         self.yaw_dot:float = 0.0
-        # WORKING:  --- Feb 24, 2026
+        
         self.current_mission_complete_status = False
         # UAV operational_status
         # mission_plan, path_plan,trajectory_plan can be added before new_mission/during uav_in_flight 
@@ -207,6 +214,7 @@ class UAV_template(ABC):
         self.has_left_start = False 
         self.has_reached_end = False 
         # UAV state - at vertiport or in flight 
+        #TODO: check/find condition for attr update 
         self.uav_in_flight:bool = True
         
         # ADDED odometer attr:
