@@ -11,51 +11,78 @@ pluggable dynamics/controller/planner/sensor models, collision detection, option
 
 ## Environment
 
-Conda only — there is no pip/venv path.
+Conda + an editable pip install — there is no plain pip/venv-only path.
 
 ```bash
 conda config --add channels conda-forge
 conda env create -f environment_ubuntu.yml
 conda activate AAM_AMOD
+pip install -e .          # installs src/urbannav and rl as editable packages
 ```
 
-Activate `AAM_AMOD` before running anything in this repo (scripts, tests, notebooks).
+Activate `AAM_AMOD` before running anything in this repo (scripts, tests, notebooks). Re-run
+`pip install -e .` any time a pull touches `pyproject.toml` or adds/removes packages.
 
 ## Common commands
 
 ```bash
-# Run the full test suite (conftest.py adds repo root to sys.path; no install step needed)
-pytest tests/
+# Run the full test suite (testpaths = tests/ and rl/, set in pyproject.toml)
+pytest
 
 # Run a single test file / test
 pytest tests/test_init.py -v
 pytest tests/test_collision_scenario.py::TestClassName::test_name -v
+pytest rl/single_agent/tests/test_single_agent_env.py -v
 
 # Run the simulator end-to-end against sample_config.yaml
 python -c "
-from uam_simulator import UAMSimulator
+from urbannav.uam_simulator import UAMSimulator
 sim = UAMSimulator(config_path='sample_config.yaml')
 sim.reset()
 for _ in range(sim.total_timestep):
     sim.step({})
 sim.render()
 "
+
+# Quick manual runners (not pytest — see their module docstrings for flags)
+python deployment.py                  # mission/flight sim smoke test + render
+python src/urbannav/deployment_vp_design.py   # vertiport-design sim variant
+python benchmarks/deployment_regression_analysis.py   # step-time/memory regression sweep
 ```
 
-There is no lint/format/build tooling configured (no `pyproject.toml`, `setup.cfg`, or pytest ini)
-— `tests/conftest.py` manually inserts the repo root onto `sys.path` so flat-module imports work.
+`pre-commit` is configured (`.pre-commit-config.yaml`): `black` (line-length 100), `isort`
+(black profile), `flake8` (`--max-line-length=100 --extend-ignore=E203,W503`). Run
+`pre-commit run --all-files` before committing if hooks aren't installed locally.
 
 The `tests/` suite is layered and tests are meant to be read in order: `test_init.py` (config/build)
 → `test_step.py` → `test_collision_scenario.py` / `test_collision_performance.py` →
-`test_integration.py` / `test_single_agent_env.py`. The shared `sim` fixture in `conftest.py` is
-module-scoped specifically to avoid re-fetching OSM map data per test — don't change that scope
-without considering test runtime. `conftest.py` also exposes a `three_uav_rig` fixture that builds
-3 UAVs directly with scripted positions, bypassing Airspace/ATC/OSM, to deterministically exercise
-the detect → NMAC → collision pipeline.
+`test_integration.py`. RL-specific tests live alongside the RL code at
+`rl/single_agent/tests/test_single_agent_env.py`, not under `tests/`. The shared `sim` fixture in
+`tests/conftest.py` is module-scoped specifically to avoid re-fetching OSM map data per test —
+don't change that scope without considering test runtime. `conftest.py` also exposes a
+`three_uav_rig` fixture that builds 3 UAVs directly with scripted positions, bypassing
+Airspace/ATC/OSM, to deterministically exercise the detect → NMAC → collision pipeline.
 
 `Python-RVO2/` is a vendored third-party C++/Cython library (ORCA collision avoidance) with its own
-CMake/setup.py build; it is not part of the main Python package and is wired in only as a future
+CMake/setup.py build; it is not part of the `urbannav` package and is wired in only as a future
 `ORCA` dynamics/controller backend (see `VALID_DYNAMICS`/`VALID_CONTROLLERS` in `component_schema.py`).
+
+## Repo layout
+
+```
+src/urbannav/   — the installable `urbannav` package: simulator core, all pluggable components
+rl/             — the installable `rl` package: Gymnasium/PettingZoo envs + training scripts,
+                  grouped by rl/common (shared obs-space defs + per-agent obs/action/reward/
+                  termination logic in agent_logic.py), rl/single_agent, rl/multi_agent,
+                  rl/surrogate (stub), rl/vertiport_design
+benchmarks/     — standalone perf/regression scripts, not part of either package, not under pytest
+tests/          — pytest suite for the core simulator (see testpaths above)
+sample_config.yaml, environment_ubuntu.yml, pyproject.toml — root-level, drive both packages
+```
+
+Both `src/urbannav` and `rl` are declared in `pyproject.toml`
+(`[tool.setuptools.packages.find]`, `include = ["urbannav*", "rl*"]`) and installed together by
+the single `pip install -e .`.
 
 ## Architecture
 
@@ -75,10 +102,10 @@ UAMSimulator (uam_simulator.py)
   └─ Logger (logger.py) / MetricsCollector (metrics_collector.py) — per-episode logs under logs/
 ```
 
-`UAMSimulator.reset()`/`.step()` is the public entry point used by both plain scripts and the gym
-wrapper. `SimulatorManager.reset()` builds Airspace → ATC → the four Engine objects → UAV fleet (in
-that order — each step depends on the previous), then calls each engine's
-`register_uav_*()` to wire UAVs into per-component maps.
+All of the above live in `src/urbannav/`. `UAMSimulator.reset()`/`.step()` is the public entry
+point used by both plain scripts and the gym wrapper. `SimulatorManager.reset()` builds
+Airspace → ATC → the four Engine objects → UAV fleet (in that order — each step depends on the
+previous), then calls each engine's `register_uav_*()` to wire UAVs into per-component maps.
 
 ### Config-driven, registry-resolved components
 
@@ -94,7 +121,7 @@ resolved to a concrete class through a `*_CLASS_MAP` dict living in the correspo
 
 UAV *physical* parameters (radius, max speed, etc.) are intentionally **not** in the yaml — they
 live in code in `UAV_TYPE_REGISTRY` (`component_schema.py`), keyed by `type_name` (`STANDARD`,
-`HEAVY`, `LEARNING`, `ORCA`). The yaml only assigns `fleet_composition` entries (`type_name`,
+`HEAVY`, `SINGLE_AGENT_LEARNING`, `MULTI_AGENT_LEARNING`, `ORCA`). The yaml only assigns `fleet_composition` entries (`type_name`,
 `count`, `dynamics`, `controller`, `sensor`, `planner`) which `build_fleet_blueprint()` expands into
 one `UAVBlueprint` per UAV instance, consumed by `ATC.create_uavS_from_blueprint()`.
 
@@ -105,15 +132,35 @@ its map and instantiates one component object per *type actually present* in the
 
 ### RL integration
 
-`type_name: LEARNING` is a reserved fleet entry (at most one per config, enforced by
-`validate_fleet_composition()`) whose `controller` must be `None` — its action is supplied
-externally instead of by `AerBus`. `mode: TRAIN|TEST` is required only for this entry.
-`AerBus.RL_CONTROLLER_NAMES` (`{'RL'}`) marks which controller name signals this skip. The
-Gymnasium wrapper `single_agent_gym_env.py::UAMSimEnv` finds the LEARNING UAV id via
-`SimulatorManager.get_learning_uav_id()`, supplies its action each step as an `UAVCommand` with
-`ActionType.CONTROL`, and `SimulatorManager.map_actions_to_uavs()` merges that external action
-with the internally-generated ones before dispatch to `DynamicsEngine`. Observation space
-definitions live in `obs_space_definitions.py` (`OBS_SPACE` registry).
+The RL code is a separate installable package (`rl/`) that depends on `urbannav` — it is not
+inside `src/urbannav`. Two reserved `type_name`s exist (`RESERVED_TYPE_SINGLE_AGENT_LEARNING` /
+`RESERVED_TYPE_MULTI_AGENT_LEARNING` in `component_schema.py`; `RESERVED_TYPE_LEARNING` is kept
+as a backward-compat alias for the former): `SINGLE_AGENT_LEARNING` allows at most one fleet
+entry (enforced by `validate_fleet_composition()`, which IS wired into `UAMConfig.load_from_yaml()`)
+and `mode=TRAIN` forces `count==1` (one agent being trained; `mode=TEST` allows deploying the same
+policy across `count>1` UAVs). `MULTI_AGENT_LEARNING` allows any number of fleet entries; every
+entry of either LEARNING type requires a `policy_id` (forbidden on non-LEARNING entries), and all
+entries sharing one `policy_id` must use identical dynamics/controller/sensor/planner.
+`controller: RL` (not `None`) is the actual marker AerBus checks (`AerBus.RL_CONTROLLER_NAMES`,
+`{'RL'}`) to skip internal action generation for a UAV — this applies identically regardless of
+type_name, since routing is keyed off controller name. `AerBus.get_rl_policy_uav_map()` and
+`SimulatorManager.get_multi_agent_uav_ids()` both expose `{policy_id: [uav_id, ...]}` groupings
+(the UAV's `policy_id` attribute is set by `ATC.create_uav_from_blueprint()` from
+`UAVBlueprint.policy_id`).
+
+Per-agent obs/action/reward/termination logic lives in `rl/common/agent_logic.py` (free functions
+keyed by `uav_id`, not methods), shared by both:
+- `rl/single_agent/single_agent_gym_env.py::UAMSimEnv` (Gymnasium `Env`) — finds the
+  `SINGLE_AGENT_LEARNING` UAV id via `SimulatorManager.get_learning_uav_id()`.
+- `rl/multi_agent/multi_agent_gym_env.py::UAMMultiAgentEnv` (PettingZoo `ParallelEnv`, verified
+  against `pettingzoo.test.parallel_api_test`) — one agent per `MULTI_AGENT_LEARNING` UAV, keyed
+  by the UAV's *blueprint* string id (stable across resets), not its runtime int `uav_id` (which
+  ATC reassigns each `reset()` and which the env maps internally).
+
+Both wrap a single `UAVCommandBundle` step: `SimulatorManager.map_actions_to_uavs()` merges
+external (gym/pettingzoo-supplied) actions with the internally-generated ones before dispatch to
+`DynamicsEngine`. Observation space definitions live in `rl/common/obs_space_definitions.py`
+(`OBS_SPACE` registry). `rl/surrogate/` is currently an empty stub package (just `__init__.py`).
 
 ### AerBus execution modes
 
@@ -163,19 +210,23 @@ comes from `Airspace` which is built after the sensor map exists.
 ### Two simulation variants
 
 - **Mission/flight simulation** (`uam_simulator.py`, `simulator_manager.py`): UAVs flying between
-  existing vertiports — the primary, actively-developed path.
+  existing vertiports — the primary, actively-developed path. Smoke-tested via `deployment.py`.
 - **Vertiport design simulation** (`uam_simulator_vp_design.py`, `simulator_manager_vp_design.py`,
-  `vertiport_design_env.py`, `deployment_vp_design.py`): a separate, parallel pipeline for the
-  vertiport *placement* problem (where to put vertiports given OD demand), built on
-  region/zone data in `Austin_GEOID_data/` and `band1_output_*/`. These are independent entry
-  points, not alternate code paths through the same classes — don't assume changes to
-  `simulator_manager.py` propagate to `simulator_manager_vp_design.py` or vice versa.
+  `deployment_vp_design.py` in `src/urbannav/`; `rl/vertiport_design/vertiport_design_env.py` for
+  the Gym wrapper): a separate, parallel pipeline for the vertiport *placement* problem (where to
+  put vertiports given OD demand). OD-matrix input is passed at runtime via `--od-matrix` (see
+  `deployment_vp_design.py`'s docstring) rather than baked into a repo data directory. These are
+  independent entry points, not alternate code paths through the same classes — don't assume
+  changes to `simulator_manager.py` propagate to `simulator_manager_vp_design.py` or vice versa.
+  `rl/vertiport_design/vertiport_design_env.py` is unfinished (incomplete `spaces.` assignments) —
+  check before assuming it runs.
 
 ## Conventions specific to this codebase
 
-- Modules are flat (no `src/` package, no `__init__.py`) and import each other by bare module
-  name (e.g. `from atc import ATC`) — this only works because `conftest.py` / scripts run from the
-  repo root.
+- `urbannav` and `rl` are real installed packages (`pip install -e .`, layout in `pyproject.toml`)
+  — import with `from urbannav.atc import ATC` / `from rl.common.obs_space_definitions import
+  OBS_SPACE`, not bare module names. There is no `sys.path` manipulation anymore; if you find code
+  still doing that, it predates the `src/` restructure and should be fixed rather than emulated.
 - `*_template.py` files are the ABCs for pluggable components; concrete implementations are named
   `<component>_<variant>.py` (e.g. `controller_pid_point_mass.py`), not nested under a package per
   component type.
@@ -186,3 +237,5 @@ comes from `Airspace` which is built after the sensor map exists.
   and half-finished refactors (e.g. `simulator_manager.py`'s `map_actions_to_uavs`/
   `map_plans_to_uavs`, `_build_assets`). Read the surrounding comments before refactoring these —
   they usually describe the intended direction already.
+- Code style is enforced by `pre-commit` (black/isort/flake8, 100-char lines) — match that
+  formatting in new code even if you don't run the hooks locally.

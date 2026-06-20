@@ -9,7 +9,7 @@ from urbannav.planner_engine import PlannerEngine
 from urbannav.aer_bus import AerBus
 from urbannav.dynamics_engine import DynamicsEngine
 from urbannav.component_schema import UAVCommandBundle, ActionType, SimulatorState, build_fleet_blueprint
-from urbannav.component_schema import RESERVED_TYPE_LEARNING
+from urbannav.component_schema import RESERVED_TYPE_SINGLE_AGENT_LEARNING, RESERVED_TYPE_MULTI_AGENT_LEARNING
 
 class SimulatorManager:
     '''Primary class that orchestrates and manages assets/data_classes,
@@ -351,9 +351,23 @@ class SimulatorManager:
         Returns None if no LEARNING UAV is present (e.g. before the first reset).
         """
         for uid, uav in self.atc.uav_dict.items():
-            if getattr(uav, 'type_name', None) == RESERVED_TYPE_LEARNING:
+            if getattr(uav, 'type_name', None) == RESERVED_TYPE_SINGLE_AGENT_LEARNING:
                 return uid
         return None
+
+    def get_multi_agent_uav_ids(self) -> Dict[str, List[int]]:
+        """
+        Return {policy_id: [uav_id, ...]} for all MULTI_AGENT_LEARNING UAVs in
+        atc.uav_dict, grouped by their shared policy_id. Returns an empty dict
+        if no MULTI_AGENT_LEARNING UAVs are present (e.g. before the first reset).
+        """
+        policy_uav_map: Dict[str, List[int]] = {}
+        for uid, uav in self.atc.uav_dict.items():
+            if getattr(uav, 'type_name', None) == RESERVED_TYPE_MULTI_AGENT_LEARNING:
+                policy_id = getattr(uav, 'policy_id', None)
+                if policy_id is not None:
+                    policy_uav_map.setdefault(policy_id, []).append(uid)
+        return policy_uav_map
 
 
 

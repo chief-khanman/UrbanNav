@@ -4,7 +4,7 @@ import pandas as pd
 from urbannav.simulator_manager_vp_design import SimulatorManagerVPDesign
 from urbannav.renderer import Renderer
 from urbannav.logger import Logger
-from urbannav.component_schema import UAMConfig, ActionType, UAVCommand, UAVCommandBundle, SimulatorState, RESERVED_TYPE_LEARNING
+from urbannav.component_schema import UAMConfig, ActionType, UAVCommand, UAVCommandBundle, SimulatorState, RESERVED_TYPE_SINGLE_AGENT_LEARNING
 
 
 class UAMSimulatorVPDesign:

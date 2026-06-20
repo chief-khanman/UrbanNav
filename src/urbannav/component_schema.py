@@ -25,20 +25,19 @@ import json
 # if mode 'train' UAV has no controller, elif mode 'test' UAV must have mapping to RL controller
 # use AerBus to extract UAV state information for mode: 'test' RL controller. 
 
-# Multi-agent RL - 
-# steps: 
-# define a new reserved_type_learning -- maybe change 'LEARNING' TO 'SINGLE_AGENT_LEARNING', this will make more sense when we add 'MULTI_AGENT_LEARNING'
-# if MULTI_AGENT_LEARNING: 
-#   capture all the UAVs with same policy. 
-#   So this means we will have to add a new UAV  attr to UAVFleetInstanceConfig - policy_id, 
-#   MULTI_AGENT_LEARNING UAVs with same policy_id string are assigned one policy
-#   the rest of the logic is the same as single agent - all UAVs that belong to the same policy 
-#                                                       should have the same dynamics, sensor, planner(if needed)
-# else :
-#   follow existing rules 
+# Multi-agent RL:
+# - RESERVED_TYPE_SINGLE_AGENT_LEARNING: at most one fleet_composition entry; mode
+#   TRAIN requires count==1 (one agent being trained), mode TEST allows count>=1
+#   (deploying a single trained policy across multiple UAVs).
+# - RESERVED_TYPE_MULTI_AGENT_LEARNING: any number of fleet_composition entries;
+#   each entry must set policy_id, and all entries sharing one policy_id must use
+#   identical dynamics/controller/sensor/planner (they're trained/deployed as one
+#   shared policy across however many UAVs use that policy_id).
 
-
-RESERVED_TYPE_LEARNING = 'LEARNING'
+RESERVED_TYPE_SINGLE_AGENT_LEARNING = 'SINGLE_AGENT_LEARNING'
+RESERVED_TYPE_MULTI_AGENT_LEARNING = 'MULTI_AGENT_LEARNING'
+RESERVED_TYPE_LEARNING = RESERVED_TYPE_SINGLE_AGENT_LEARNING  # backward-compat alias
+RESERVED_LEARNING_TYPES: set[str] = {RESERVED_TYPE_SINGLE_AGENT_LEARNING, RESERVED_TYPE_MULTI_AGENT_LEARNING}
 RESERVED_TYPE_MODE: set[str] = {'TRAIN', 'TEST'}
 # Valid string identifiers for each component type.
 # Dynamics, controller, sensor classes are wired separately once those modules are ready.
@@ -53,7 +52,8 @@ VALID_PLANNERS: set[str] = {'PointMass-PID', 'Holonomic-PID', 'PointMass-RL', 'S
 VALID_UAVS: set[str] = {
     'STANDARD',
     'HEAVY',
-    'LEARNING',   # reserved — used only when training RL-based controllers
+    'SINGLE_AGENT_LEARNING',   # reserved — single RL policy, trained or deployed
+    'MULTI_AGENT_LEARNING',    # reserved — RL policy shared across UAVs via policy_id
     'ORCA',
 }
 
@@ -147,7 +147,16 @@ UAV_TYPE_REGISTRY.update({
         max_heading_change=math.pi,
         max_velocity=10.0,
     ),
-    'LEARNING': UAVTypeConfig(
+    'SINGLE_AGENT_LEARNING': UAVTypeConfig(
+        radius=17.0,
+        nmac_radius=200.0,
+        detection_radius=500.0,
+        max_speed=10.0,
+        max_acceleration=3.0,
+        max_heading_change=math.pi,
+        max_velocity=15.0,
+    ),
+    'MULTI_AGENT_LEARNING': UAVTypeConfig(
         radius=17.0,
         nmac_radius=200.0,
         detection_radius=500.0,
@@ -178,7 +187,8 @@ class UAVFleetInstanceConfig(BaseModel):
     controller: str  # None valid only for LEARNING type
     sensor: str             # must be a key in VALID_SENSORS
     planner: str            # must be a key in VALID_PLANNERS
-    mode: Optional[str] = None  # required for LEARNING type only; must be in RESERVED_TYPE_MODE
+    mode: Optional[str] = None  # required for LEARNING types; must be in RESERVED_TYPE_MODE
+    policy_id: Optional[str] = None  # required for LEARNING types; forbidden otherwise
 
     @field_validator('type_name')
     @classmethod
@@ -228,25 +238,55 @@ class UAVFleetInstanceConfig(BaseModel):
     @model_validator(mode='after')
     def learning_type_controller_check(self) -> 'UAVFleetInstanceConfig':
         """LEARNING UAVs may omit controller (RL policy is assigned at training time)."""
-        if self.type_name != RESERVED_TYPE_LEARNING and self.controller is None:
+        if self.type_name not in RESERVED_LEARNING_TYPES and self.controller is None:
             raise ValueError(
                 f"controller must be set for non-LEARNING type '{self.type_name}'"
             )
         return self
-    
+
     @model_validator(mode='after')
     def learning_type_mode_check(self) -> 'UAVFleetInstanceConfig':
         """mode must be set for LEARNING types and must NOT be set for any other type."""
-        if self.type_name == RESERVED_TYPE_LEARNING:
+        if self.type_name in RESERVED_LEARNING_TYPES:
             if self.mode is None or self.mode not in RESERVED_TYPE_MODE:
                 raise ValueError(
-                    f"LEARNING type requires mode from {RESERVED_TYPE_MODE}, got: {self.mode!r}"
+                    f"LEARNING type '{self.type_name}' requires mode from "
+                    f"{RESERVED_TYPE_MODE}, got: {self.mode!r}"
                 )
         else:
             if self.mode is not None:
                 raise ValueError(
-                    f"mode must only be set for LEARNING type, got mode={self.mode!r} "
+                    f"mode must only be set for LEARNING types, got mode={self.mode!r} "
                     f"on type_name='{self.type_name}'"
+                )
+        return self
+
+    @model_validator(mode='after')
+    def learning_type_policy_id_check(self) -> 'UAVFleetInstanceConfig':
+        """policy_id must be set for LEARNING types and must NOT be set for any other type."""
+        if self.type_name in RESERVED_LEARNING_TYPES:
+            if not self.policy_id:
+                raise ValueError(
+                    f"LEARNING type '{self.type_name}' requires a non-empty policy_id"
+                )
+        else:
+            if self.policy_id is not None:
+                raise ValueError(
+                    f"policy_id must only be set for LEARNING types, got "
+                    f"policy_id={self.policy_id!r} on type_name='{self.type_name}'"
+                )
+        return self
+
+    @model_validator(mode='after')
+    def single_agent_train_mode_count_check(self) -> 'UAVFleetInstanceConfig':
+        """SINGLE_AGENT_LEARNING with mode=TRAIN trains exactly one agent; mode=TEST
+        may deploy the same trained policy across any number of UAVs (count>=1,
+        already enforced by count_must_be_positive)."""
+        if self.type_name == RESERVED_TYPE_SINGLE_AGENT_LEARNING and self.mode == 'TRAIN':
+            if self.count != 1:
+                raise ValueError(
+                    f"SINGLE_AGENT_LEARNING with mode='TRAIN' requires count==1 "
+                    f"(one agent being trained), got count={self.count}"
                 )
         return self
 
@@ -267,11 +307,13 @@ class UAMConfig(BaseModel):
         with open(path, 'r') as f:
             data = yaml.safe_load(f)
         try:
-            return cls(**data)
+            config = cls(**data)
         except ValidationError as e:
             print('Configuration Error: The config file format is wrong')
             print(e)
             raise
+        validate_fleet_composition(config)
+        return config
 
 #### ------------ CONFIG ------------ ####
 
@@ -288,6 +330,7 @@ class UAVBlueprint:
     controller_name: str
     sensor_name: str
     planner_name: str
+    policy_id: Optional[str] = None
 
 
 #TODO: this function needs to be placed in simulator_manager OR atc - later update
@@ -321,7 +364,8 @@ def build_fleet_blueprint(config: UAMConfig) -> List[UAVBlueprint]:
                 dynamics_name=entry.dynamics,
                 controller_name=entry.controller,
                 sensor_name=entry.sensor,
-                planner_name=entry.planner
+                planner_name=entry.planner,
+                policy_id=entry.policy_id,
             ))
             global_index += 1
 
@@ -330,23 +374,28 @@ def build_fleet_blueprint(config: UAMConfig) -> List[UAVBlueprint]:
 
 def validate_fleet_composition(config: UAMConfig) -> None:
     """
-    Run all fleet-level checks that require the full config context.
+    Run all fleet-level checks that require the full config context (i.e. checks
+    that compare multiple fleet_composition entries against each other — anything
+    checkable from a single entry alone lives in UAVFleetInstanceConfig's own
+    model_validators instead).
     Raises ValueError with a descriptive message on the first failure found.
 
     Checks performed:
     - Each type_name is in VALID_UAVS and has an entry in UAV_TYPE_REGISTRY.
-    - At most one LEARNING entry is present (only one RL training slot).
-    - LEARNING entries have controller=None.
-    - Non-LEARNING entries have a controller specified.
+    - At most one SINGLE_AGENT_LEARNING entry is present (only one RL training/
+      deployment slot); any number of MULTI_AGENT_LEARNING entries are allowed.
+    - All fleet entries sharing one policy_id (MULTI_AGENT_LEARNING) use identical
+      dynamics/controller/sensor/planner, since they're trained/deployed as one
+      shared policy.
     """
-    learning_count = sum(
+    single_agent_count = sum(
         1 for e in config.fleet_composition
-        if e.type_name == RESERVED_TYPE_LEARNING
+        if e.type_name == RESERVED_TYPE_SINGLE_AGENT_LEARNING
     )
-    if learning_count > 1:
+    if single_agent_count > 1:
         raise ValueError(
-            f"At most one fleet entry may use the reserved type LEARNING, "
-            f"found {learning_count}."
+            f"At most one fleet entry may use the reserved type "
+            f"{RESERVED_TYPE_SINGLE_AGENT_LEARNING}, found {single_agent_count}."
         )
 
     for entry in config.fleet_composition:
@@ -357,12 +406,23 @@ def validate_fleet_composition(config: UAMConfig) -> None:
                 f"from UAV_TYPE_REGISTRY. Add its UAVTypeConfig entry."
             )
 
-        # LEARNING-specific check
-        if entry.type_name == RESERVED_TYPE_LEARNING:
-            if entry.controller is not None:
+    # All entries sharing a policy_id must describe the same component wiring,
+    # since they're trained/deployed as one shared policy.
+    policy_groups: Dict[str, List[UAVFleetInstanceConfig]] = {}
+    for entry in config.fleet_composition:
+        if entry.policy_id is not None:
+            policy_groups.setdefault(entry.policy_id, []).append(entry)
+
+    for policy_id, entries in policy_groups.items():
+        first = entries[0]
+        for other in entries[1:]:
+            if (other.dynamics, other.controller, other.sensor, other.planner) != \
+               (first.dynamics, first.controller, first.sensor, first.planner):
                 raise ValueError(
-                    "LEARNING fleet entry must have controller=null; "
-                    "the RL policy is assigned externally at training time."
+                    f"All fleet entries sharing policy_id='{policy_id}' must use "
+                    f"identical dynamics/controller/sensor/planner; "
+                    f"found {(first.dynamics, first.controller, first.sensor, first.planner)} "
+                    f"vs {(other.dynamics, other.controller, other.sensor, other.planner)}."
                 )
 
 #### ------------ FLEET BUILDER ------------ ####

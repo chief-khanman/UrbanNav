@@ -177,6 +177,7 @@ class ATC():
         uav.controller_name = uav_blueprint.controller_name
         uav.sensor_name = uav_blueprint.sensor_name
         uav.planner_name = uav_blueprint.planner_name
+        uav.policy_id = uav_blueprint.policy_id
         
         # set uav 
         self._set_uav(uav)

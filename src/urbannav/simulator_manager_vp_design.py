@@ -10,7 +10,7 @@ from urbannav.planner_engine import PlannerEngine
 from urbannav.aer_bus import AerBus
 from urbannav.dynamics_engine import DynamicsEngine
 from urbannav.component_schema import UAVCommandBundle, ActionType, SimulatorState, build_fleet_blueprint
-from urbannav.component_schema import RESERVED_TYPE_LEARNING
+from urbannav.component_schema import RESERVED_TYPE_SINGLE_AGENT_LEARNING
 
 
 class SimulatorManagerVPDesign:
@@ -512,7 +512,7 @@ class SimulatorManagerVPDesign:
         Returns None if no LEARNING UAV is present (e.g. before the first reset).
         """
         for uid, uav in self.atc.uav_dict.items():
-            if getattr(uav, 'type_name', None) == RESERVED_TYPE_LEARNING:
+            if getattr(uav, 'type_name', None) == RESERVED_TYPE_SINGLE_AGENT_LEARNING:
                 return uid
         return None
 

@@ -45,6 +45,10 @@ class AerBus:
       generation for that UAV. The gym environment supplies actions via
       external_actions in SimulatorManager.step(), which are merged with internal
       actions via map_actions_to_uavs() before being dispatched to DynamicsEngine.
+      This applies identically to single-agent and multi-agent learning UAVs —
+      routing is keyed off controller_name, not type_name. get_rl_policy_uav_map()
+      additionally groups RL UAVs by policy_id, so a multi-agent gym wrapper can
+      tell which UAVs share one trained policy.
     """
 
     def __init__(self, config, controller_uav_map: Dict[str, List[int]],
@@ -70,6 +74,12 @@ class AerBus:
 
         # RL UAVs: actions come from gym via external_actions, skip in get_actions()
         self.rl_uav_ids: Set[int] = set()
+
+        # RL UAVs grouped by policy_id — single-agent learning UAVs each get their
+        # own policy_id; multi-agent learning UAVs sharing one policy_id are routed
+        # to the same trained policy. Built from uav.policy_id (set by
+        # ATC.create_uav_from_blueprint() from UAVBlueprint.policy_id).
+        self.rl_policy_uav_map: Dict[str, List[int]] = {}
 
         # mode
         self.mode:str = mode
@@ -130,10 +140,16 @@ class AerBus:
                 )
 
             if controller_name in RL_CONTROLLER_NAMES:
-                # RL training mode: no internal action generation.
+                # RL training/deployment mode: no internal action generation.
                 # The gym environment will supply actions via external_actions.
+                # Grouped by policy_id (single-agent learning UAVs each have their
+                # own policy_id; multi-agent learning UAVs sharing one policy_id
+                # are routed to the same trained policy by the caller).
                 for uav_id in uav_id_list:
                     self.rl_uav_ids.add(uav_id)
+                    policy_id = getattr(self.uav_dict.get(uav_id), 'policy_id', None)
+                    if policy_id is not None:
+                        self.rl_policy_uav_map.setdefault(policy_id, []).append(uav_id)
                 print(f'[AerBus] "{controller_name}" → RL mode for UAVs: {uav_id_list}')
 
             elif controller_name in CONTROLLER_CLASS_MAP:
@@ -150,6 +166,14 @@ class AerBus:
                 mode = ExecutionMode.EXTERNAL
                 self.register_controller(controller_name, uav_id_list,
                                          mode, instance=None)
+
+    def get_rl_policy_uav_map(self) -> Dict[str, List[int]]:
+        """Return {policy_id: [uav_id, ...]} for all RL-controlled UAVs.
+
+        A single-agent learning UAV is its own one-entry group; multi-agent
+        learning UAVs sharing one policy_id appear together under that key.
+        """
+        return dict(self.rl_policy_uav_map)
 
     # ------------------------------------------------------------------
     # Step
