@@ -1,0 +1,27 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up conda environment
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          environment-file: environment_ubuntu.yml
+          activate-environment: AAM_AMOD
+          channels: conda-forge,defaults
+
+      - name: Install urbannav + rl (editable)
+        shell: bash -l {0}
+        run: pip install -e .
+
+      - name: Run tests
+        shell: bash -l {0}
+        run: pytest

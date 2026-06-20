@@ -5,6 +5,8 @@ build
 __pycache__
 TrialScripts
 /.*
+!/.github
+!/.pre-commit-config.yaml
 logs
 renders
 *.csv
@@ -12,4 +14,5 @@ renders
 /Austin_GEOID_data
 /band1_*
 /dev_test
+*.egg-info/
 

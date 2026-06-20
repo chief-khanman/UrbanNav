@@ -7,14 +7,9 @@ plan → control → dynamics → sensor → mission-lifecycle pipeline.
 Run in isolation:
     pytest tests/test_step.py -v
 """
-import sys
-import os
 import pytest
 
-PROJECT_ROOT = os.path.join(os.path.dirname(__file__), '..')
-sys.path.insert(0, os.path.abspath(PROJECT_ROOT))
-
-from uam_simulator import UAMSimulator
+from urbannav.uam_simulator import UAMSimulator
 
 
 # Each test in this module gets a fresh sim so step count is always 0→1.

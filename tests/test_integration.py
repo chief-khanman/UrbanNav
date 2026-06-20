@@ -11,14 +11,9 @@ Run in isolation:
 NOTE: These tests use scope='module' to share one simulation run per module
 so the 100-step run is not repeated for each test class.
 """
-import sys
-import os
 import pytest
 
-PROJECT_ROOT = os.path.join(os.path.dirname(__file__), '..')
-sys.path.insert(0, os.path.abspath(PROJECT_ROOT))
-
-from uam_simulator import UAMSimulator
+from urbannav.uam_simulator import UAMSimulator
 
 N_STEPS = 10000
 

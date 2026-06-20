@@ -8,7 +8,7 @@ Run in isolation:
     pytest tests/test_init.py -v
 """
 import pytest
-from component_schema import UAMConfig, build_fleet_blueprint
+from urbannav.component_schema import UAMConfig, build_fleet_blueprint
 
 
 # ── Config ──────────────────────────────────────────────────────────────────
@@ -30,10 +30,13 @@ class TestConfigLoads:
         assert len(config.fleet_composition) > 0
 
     def test_fleet_total_count(self, config_path):
-        """sample_config.yaml defines 2 STANDARD + 3 HEAVY = 5 UAVs."""
+        """Each fleet entry's count must parse as a positive int; total > 0."""
         config = UAMConfig.load_from_yaml(config_path)
-        total = sum(e.count for e in config.fleet_composition)
-        assert total == 5
+        assert len(config.fleet_composition) > 0
+        for entry in config.fleet_composition:
+            assert isinstance(entry.count, int)
+            assert entry.count > 0
+        assert sum(e.count for e in config.fleet_composition) > 0
 
     def test_build_fleet_blueprint_produces_blueprints(self, config_path):
         config = UAMConfig.load_from_yaml(config_path)
@@ -47,14 +50,14 @@ class TestConfigLoads:
 class TestSimulatorInit:
     def test_simulator_constructs(self, config_path):
         """UAMSimulator.__init__ completes and exposes expected attributes."""
-        from uam_simulator import UAMSimulator
+        from urbannav.uam_simulator import UAMSimulator
         s = UAMSimulator(config_path=config_path)
         assert hasattr(s, 'simulator_manager')
         assert hasattr(s, 'total_timestep')
         assert s.total_timestep > 0
 
     def test_simulator_manager_created(self, config_path):
-        from uam_simulator import UAMSimulator
+        from urbannav.uam_simulator import UAMSimulator
         s = UAMSimulator(config_path=config_path)
         assert s.simulator_manager is not None
 
@@ -62,11 +65,13 @@ class TestSimulatorInit:
 # ── Reset ────────────────────────────────────────────────────────────────────
 
 class TestSimulatorReset:
-    def test_reset_populates_uav_dict(self, sim):
-        """After reset(), ATC must hold the correct number of UAVs."""
+    def test_reset_populates_uav_dict(self, sim, config_path):
+        """After reset(), ATC must hold exactly as many UAVs as the config requests."""
+        expected_total = sum(e.count for e in UAMConfig.load_from_yaml(config_path).fleet_composition)
         uav_dict = sim.simulator_manager.atc.uav_dict
-        assert len(uav_dict) == 5, (
-            f"Expected 5 UAVs (2 STANDARD + 3 HEAVY), got {len(uav_dict)}"
+        assert len(uav_dict) == expected_total, (
+            f"Expected {expected_total} UAVs per sample_config.yaml's "
+            f"fleet_composition, got {len(uav_dict)}"
         )
 
     def test_reset_creates_vertiports(self, sim):

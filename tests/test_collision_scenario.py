@@ -16,12 +16,7 @@ positions scripted per step via conftest.set_scripted_positions:
 Run in isolation:
     pytest tests/test_collision_scenario.py -v
 """
-import sys
-import os
 import pytest
-
-PROJECT_ROOT = os.path.join(os.path.dirname(__file__), '..')
-sys.path.insert(0, os.path.abspath(PROJECT_ROOT))
 
 from conftest import build_three_uav_rig, set_scripted_positions
 

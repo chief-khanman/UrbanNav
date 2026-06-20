@@ -1,18 +1,14 @@
 """
 Shared pytest fixtures for the UAM Simulator test suite.
 
-All tests import from the project root. pytest discovers this conftest.py
-and adds the root to sys.path so imports work without a package install.
+Imports use the installed `urbannav` package (`pip install -e .` from repo root).
 """
-import sys
 import os
 import pytest
 
-# Add project root to path so all simulator modules are importable
 PROJECT_ROOT = os.path.join(os.path.dirname(__file__), '..')
-sys.path.insert(0, os.path.abspath(PROJECT_ROOT))
 
-from uam_simulator import UAMSimulator
+from urbannav.uam_simulator import UAMSimulator
 
 CONFIG_PATH = os.path.join(PROJECT_ROOT, 'sample_config.yaml')
 
@@ -44,9 +40,9 @@ def sim(config_path):
 # Used by tests/test_collision_scenario.py and tests/test_collision_performance.py.
 
 from shapely import Point
-from uav import UAV
-from vertiport import Vertiport
-from sensor_engine import SensorEngine
+from urbannav.uav import UAV
+from urbannav.vertiport import Vertiport
+from urbannav.sensor_engine import SensorEngine
 
 # Mirrors UAV_TYPE_REGISTRY['STANDARD'] in component_schema.py
 STANDARD_RADIUS = 17.0

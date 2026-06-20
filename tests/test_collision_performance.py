@@ -34,13 +34,8 @@ Run in isolation (need -s to see the printed report; pytest captures stdout
 by default):
     pytest tests/test_collision_performance.py -v -s
 """
-import sys
-import os
 import time
 import pytest
-
-PROJECT_ROOT = os.path.join(os.path.dirname(__file__), '..')
-sys.path.insert(0, os.path.abspath(PROJECT_ROOT))
 
 from conftest import build_three_uav_rig, set_scripted_positions
 
