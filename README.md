@@ -1,6 +1,6 @@
 # UrbanNav: A Comprehensive Simulation Framework for Urban Air Mobility Research
 
-[![ResearchGate](https://img.shields.io/badge/ResearchGate-Preprint-00CCBB.svg)](https://www.researchgate.net/publication/396179890_UrbanNav_A_Comprehensive_Simulation_Framework_for_Urban_Air_Mobility_Research)
+[![IEEE Xplore](https://img.shields.io/badge/IEEE%20Xplore-Published%20Paper-00629B?logo=ieee&logoColor=white)](https://ieeexplore.ieee.org/document/11519889)
 [![AeroConf 2026](https://img.shields.io/badge/IEEE%20AeroConf-2026-00629B.svg)](https://aeroconf.org/conference/digest)
 ![Repo code size](https://img.shields.io/github/languages/code-size/chief-khanman/UrbanNav)
 
@@ -62,12 +62,17 @@ pytest
 ## 📚 Citation
 
 ```bibtex
-@article{khanurbannav,
-  title={UrbanNav: A Comprehensive Simulation Framework for Urban Air Mobility Research},
+@INPROCEEDINGS{11519889,
   author={Khan, Aadit-Farhan and Haroon, Adam and Shoukry, Yasser and Fleming, Cody},
-  year={2025},
-  url={https://doi.org/10.13140/RG.2.2.29996.32646},
-}
+  booktitle={2026 IEEE Aerospace Conference}, 
+  title={UrbanNav: A Comprehensive Simulation Framework for Urban Air Mobility Research}, 
+  year={2026},
+  volume={},
+  number={},
+  pages={1-12},
+  keywords={Autonomous aerial vehicles;Modeling;Urban air mobility;Simulation;Image sensors;Dynamics;Printing;Signal detection;Design methodology;Algorithms},
+  doi={10.1109/AERO66936.2026.11519889}}
+
 ```
 
 ## 🙏 Acknowledgments
