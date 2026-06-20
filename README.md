@@ -40,7 +40,24 @@ conda env create -f environment_ubuntu.yml
 conda activate AAM_AMOD
 ```
 
-You will want to activate this conda environment anytime you want to run somthing in this repo.
+To activate this conda environment anytime to run something in this repo.
+
+UrbanNav is structured as a Python package (`src/urbannav/`), so after
+activating the conda environment, install it in editable mode once:
+
+```
+pip install -e .
+```
+
+This makes `import urbannav` and `import rl` 
+work from anywhere, without any `sys.path` manipulation. Re-run
+`pip install -e .` any time you pull changes that touch `pyproject.toml`.
+
+Verify the install and run the test suite:
+
+```
+pytest
+```
 
 ## 📚 Citation
 
