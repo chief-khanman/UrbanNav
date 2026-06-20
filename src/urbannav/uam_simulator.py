@@ -1,6 +1,7 @@
 #! rename - main modules/scripts to have a airspace/aeronautics theme
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 import numpy as np
+import pandas as pd
 from urbannav.simulator_manager import SimulatorManager
 from urbannav.renderer import Renderer
 from urbannav.logger import Logger
@@ -11,7 +12,23 @@ class UAMSimulator:
     """Main simulator coordinating all components"""
 
     def __init__(self,
-                 config_path:str):
+                 config_path:str,
+                 od_matrix_path: Optional[str] = None,
+                 zone_region_map_path: Optional[str] = None):
+        '''
+        Args:
+            config_path         : path to the YAML simulator config file.
+            od_matrix_path      : optional path to the Band 1 OD lambda matrix
+                                  (.npy or .csv). If None, the simulator falls
+                                  back to random mission assignment (no
+                                  demand-driven dispatch) — this is the
+                                  default, unchanged behavior.
+            zone_region_map_path: optional path to the Band 1 zone-region
+                                  mapping CSV (zone_id, region_id columns).
+                                  Static for the run; used by the vertiport-
+                                  design RL env to build vertiport_region_map
+                                  per episode. None in standalone/mission-sim use.
+        '''
 
         # config - file with ATC, airspace, vertiport, UAV
         self.config = UAMConfig.load_from_yaml(config_path)
@@ -19,7 +36,37 @@ class UAMSimulator:
         self.total_timestep = self.config.simulator.total_timestep
 
         ##### Simulator Manager #####
-        self.simulator_manager = SimulatorManager(self.config)
+        # Load OD demand matrix from Band 1 output if a path is supplied.
+        # Supports .npy (numpy array) and .csv (comma-delimited) formats.
+        # None -> SimulatorManager runs the original random mission
+        # assignment so the simulator runs unchanged in standalone use.
+        if od_matrix_path is not None:
+            if od_matrix_path.endswith('.npy'):
+                lambda_matrix = np.load(od_matrix_path)
+            else:
+                lambda_matrix = np.loadtxt(od_matrix_path, delimiter=',')
+        else:
+            lambda_matrix = None
+
+        # vertiport_region_map is built per episode by the RL environment
+        # when it selects one vertiport per region. Start as None here;
+        # update via simulator_manager.update_vertiport_region_map() before
+        # each episode when running under the RL wrapper.
+        vertiport_region_map = None
+
+        # Load static zone->region mapping from Band 1 output if supplied.
+        # CSV format: first column = zone_id, second column = region_id.
+        if zone_region_map_path is not None:
+            _df = pd.read_csv(zone_region_map_path)
+            zone_region_map: Optional[Dict] = {
+                row[0]: int(row[1]) for row in _df.itertuples(index=False, name=None)
+            }
+        else:
+            zone_region_map = None
+
+        self.simulator_manager = SimulatorManager(
+            self.config, lambda_matrix, vertiport_region_map, zone_region_map
+        )
 
         ##### Rendering #####
         self.renderer = Renderer(self.config.rendering, self.config.simulator.mode)
@@ -28,9 +75,16 @@ class UAMSimulator:
         self.logger = Logger(self.config.logging, full_config=self.config)
 
 
-    def reset(self):
-        """Reset simulator to initial state"""
-        self.simulator_manager.reset()
+    def reset(self, rebuild_airspace: bool = True):
+        """Reset simulator to initial state.
+
+        Args:
+            rebuild_airspace: forwarded to SimulatorManager.reset(). When False,
+                reuse the existing airspace (vertiport_list / regions_dict) —
+                used by VertiportDesignEnv to avoid re-fetching OSM and
+                losing the agent's vertiport selection each design-step.
+        """
+        self.simulator_manager.reset(rebuild_airspace=rebuild_airspace)
         # Pass the freshly-built airspace to the renderer so it can draw the map
         self.renderer.reset(self.simulator_manager.airspace)
         self.logger.reset()

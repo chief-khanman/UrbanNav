@@ -268,3 +268,8 @@ dependencies:
   - pytest>=7.0
   - pip:
     - pettingzoo==1.24.3
+    # GNN feature extractor for the vertiport-design RL env
+    # (rl/vertiport_design/policies/custom_gnn.py). PyG 2.x ships pure-pytorch
+    # scatter ops, so torch-scatter/torch-sparse are not required for the
+    # GATConv-based model used here against pytorch=2.3.0 cpu above.
+    - torch-geometric==2.5.3

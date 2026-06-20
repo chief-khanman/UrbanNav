@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import shapely
 import pandas as pd
@@ -440,6 +441,136 @@ class Airspace:
         self.num_regions = len(self.regions_dict.keys())
 
         return None
+
+    def build_n_center_pattern(self, center, n, distance_center_to_vertex, start_angle=0):
+        """Build n points equally spaced on a circle around center.
+
+        Args:
+            center: (x, y) center of the pattern.
+            n: number of points to place.
+            distance_center_to_vertex: radius of the circle.
+            start_angle: rotation offset (radians).
+
+        Returns:
+            List of (x, y) tuples — one per point. Pure geometry, no OSM.
+        """
+        cx, cy = center
+        r = distance_center_to_vertex
+        del_theta = 2 * math.pi / n
+        return [
+            (cx + r * math.cos(start_angle + i * del_theta),
+             cy + r * math.sin(start_angle + i * del_theta))
+            for i in range(n)
+        ]
+
+    def build_linear_vertiports_pattern(
+        self, region_center, number_of_vertiport, spacing_between_vertiports,
+        orientation='horizontal',
+    ):
+        """Build a line of vertiport centers around region_center.
+
+        Args:
+            region_center: (x, y) midpoint of the line.
+            number_of_vertiport: count of points to place.
+            spacing_between_vertiports: distance between adjacent points.
+            orientation: 'horizontal' or 'vertical'.
+
+        Returns:
+            List of (x, y) tuples — one per vertiport.
+        """
+        cx, cy = region_center
+        n = number_of_vertiport
+        spacing = spacing_between_vertiports
+        total_length = (n - 1) * spacing
+        start_offset = -total_length / 2
+
+        if orientation == 'horizontal':
+            return [(cx + start_offset + i * spacing, cy) for i in range(n)]
+        elif orientation == 'vertical':
+            return [(cx, cy + start_offset + i * spacing) for i in range(n)]
+        else:
+            raise ValueError(
+                f"Orientation must be 'horizontal' or 'vertical', got '{orientation}'"
+            )
+
+    def make_regions_dict_synthetic(
+        self,
+        num_regions: int = 4,
+        num_vertiports_per_region: int = 5,
+        distance_map_centroid_to_region_center: float = 15000,
+        distance_center_to_vertex: float = 5000,
+        spacing_between_vertiports: float = 15000,
+        orientation: str = 'horizontal',
+        start_angle: float = 0,
+        random_seed: int = 456789,
+    ) -> None:
+        """Synthetic OSM-free region builder.
+
+        Places num_regions region centers in a polygonal pattern around the
+        map centroid, then fills each region with num_vertiports_per_region
+        candidate vertiports placed either linearly (low probability) or in
+        an n_center polygon (high probability), sampled per region using
+        random_seed.
+
+        Sets the same attributes as make_regions_dict():
+            self.regions_dict — {region_id: [Vertiport, ...]}
+            self.num_regions  — len(regions_dict)
+            self.vertiport_list — extended with all candidate vertiports.
+
+        Pure geometry — no geocode_to_gdf() / features_from_polygon() calls.
+        Deterministic for a given random_seed, fast, suitable for CI and
+        VertiportDesignEnv training without network I/O.
+        """
+        random.seed(random_seed)
+        self.regions_dict = {}
+
+        centeroid = self.location_utm_gdf.centroid
+        center = (centeroid.iloc[0].x, centeroid.iloc[0].y)
+
+        region_center_list = self.build_n_center_pattern(
+            center,
+            n=num_regions,
+            distance_center_to_vertex=distance_map_centroid_to_region_center,
+            start_angle=start_angle,
+        )
+
+        for region in range(num_regions):
+            region_center = region_center_list[region]
+
+            # Randomly choose between linear pattern (weight 10) and
+            # n_center polygonal pattern (weight 30) — same weighting as the
+            # prior validated UAM_v2 implementation.
+            vertiport_builder = random.choices(
+                [self.build_linear_vertiports_pattern, self.build_n_center_pattern],
+                weights=[10, 30],
+            )[0]
+
+            if vertiport_builder is self.build_linear_vertiports_pattern:
+                vertiport_centers_list = vertiport_builder(
+                    region_center,
+                    num_vertiports_per_region,
+                    spacing_between_vertiports,
+                    orientation,
+                )
+            else:
+                vertiport_centers_list = vertiport_builder(
+                    region_center,
+                    num_vertiports_per_region,
+                    distance_center_to_vertex,
+                    0,  # start_angle
+                )
+
+            _vertiport_list = []
+            for i, vertiport_center in enumerate(sorted(vertiport_centers_list)):
+                _vp = Vertiport(Point(vertiport_center[0], vertiport_center[1]))
+                _vp.region = region
+                _vp.vp_id_for_region = i
+                _vertiport_list.append(_vp)
+            self.regions_dict[region] = _vertiport_list
+
+        self.num_regions = len(self.regions_dict.keys())
+        for vp_list in self.regions_dict.values():
+            self.vertiport_list += vp_list
 
     def get_random_vertiport_from_region(self, region) -> List[Vertiport]:
         # ensure self.regions_dict is present

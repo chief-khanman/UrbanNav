@@ -16,3 +16,6 @@ renders
 /dev_test
 *.egg-info/
 
+/tensorboard_logs/
+/plots/
+/models/
