@@ -54,6 +54,10 @@ class UAV_template(ABC):
         
         # UAV incidence counter/metric
         self.nmac_count:int = 0
+        # collision_status: configurable polarity via collision_status_convention.
+        # "active_high": 1=active, 0=collided. "collided_high": 0=active, 1=collided.
+        # Initialized to the "active" value; set by simulator_manager on collision.
+        self.collision_status: int = 1
 
         # VERTIPORT DATA
         self.start_vertiport: Vertiport

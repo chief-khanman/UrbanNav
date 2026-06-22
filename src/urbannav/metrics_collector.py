@@ -78,6 +78,7 @@ class MetricsCollector:
                 'vz':              getattr(uav, 'vz', 0.0),
                 #TODO: fix logic for incrementing nmac_count - sensor[uav_instance].get_nmac() -> increment uav.nmac_count
                 'nmac_count':      getattr(uav, 'nmac_count', 0), #! sensor does not increment NMAC count
+                'collision_status': getattr(uav, 'collision_status', 1),
                 'mission_complete': getattr(uav, 'current_mission_complete_status', False),
                 'dist_to_goal':    dist_to_goal,
             }

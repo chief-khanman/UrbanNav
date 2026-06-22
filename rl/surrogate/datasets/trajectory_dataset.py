@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -146,6 +146,19 @@ class TrajectoryDataset(Dataset):
         return self._source_keys[idx]
 
     @classmethod
-    def from_logs_root(cls, logs_root: str, **kwargs) -> 'TrajectoryDataset':
-        """Convenience constructor: build from every episode under logs_root."""
-        return cls(discover_episode_dirs(logs_root), **kwargs)
+    def from_logs_root(
+        cls, logs_root: Union[str, List[str]], **kwargs
+    ) -> 'TrajectoryDataset':
+        """Convenience constructor: build from every episode under logs_root.
+
+        Args:
+            logs_root: Single path or list of paths.  When a list is given,
+                episodes from all directories are merged into one dataset.
+        """
+        if isinstance(logs_root, str):
+            logs_root = [logs_root]
+
+        all_dirs: List[str] = []
+        for root_path in logs_root:
+            all_dirs.extend(discover_episode_dirs(root_path))
+        return cls(all_dirs, **kwargs)

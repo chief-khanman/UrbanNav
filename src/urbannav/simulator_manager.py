@@ -405,13 +405,21 @@ class SimulatorManager(DemandModelMixin):
         
         # PLAN
         plan_dict = self.planner_module.get_plans()
-        #updated_plan_dict = self.map_plans_to_uavs(plan_dict, external_ids_actions_dict=external_action_dict) 
-        
+        #updated_plan_dict = self.map_plans_to_uavs(plan_dict, external_ids_actions_dict=external_action_dict)
+
         # CONTROL ACTION
         control_actions_dict = self.controller_module.get_actions(plan_dict)
-        updated_control_actions_dict = self.map_actions_to_uavs(control_actions_dict, external_ids_actions_dict=external_action_dict) 
-        
-        # DYNAMICS 
+        updated_control_actions_dict = self.map_actions_to_uavs(control_actions_dict, external_ids_actions_dict=external_action_dict)
+
+        # Skip dynamics for collided UAVs that are persisted (frozen in place)
+        if self.config.simulator.persist_collided_uavs:
+            collided_ids = self._get_collided_uav_ids()
+            updated_control_actions_dict = {
+                uid: act for uid, act in updated_control_actions_dict.items()
+                if uid not in collided_ids
+            }
+
+        # DYNAMICS
         self.dynamics_module.step(actions_dict=updated_control_actions_dict)
 
         ### CHECK COLLISION ###
@@ -426,15 +434,50 @@ class SimulatorManager(DemandModelMixin):
         #print(f'Collision ids: {collision_dict_uavS}')
         ### REMOVE UAV ###
         # remove UAVs that have collided
-        #! check vertiports 
+        #! check vertiports
         uavs_to_remove = self._merge_collision_dicts(collision_dict_uavS, collision_dict_restricted_area)
-        self.atc.remove_uavs_by_id(uavs_to_remove)
+        if self.config.simulator.persist_collided_uavs:
+            self._mark_uavs_collided(uavs_to_remove)
+        else:
+            self.atc.remove_uavs_by_id(uavs_to_remove)
         
         # record their stats/metrics 
         
         return detection_dict_restricted_area, detection_dict_uavS, nmac_dict, collision_dict_restricted_area, collision_dict_uavS
         
 
+
+    def _get_collided_uav_ids(self) -> set:
+        """Return set of UAV ids that have been marked as collided."""
+        convention = self.config.simulator.collision_status_convention
+        collided_value = 0 if convention == "active_high" else 1
+        return {
+            uid for uid, uav in self.atc.uav_dict.items()
+            if getattr(uav, "collision_status", None) == collided_value
+        }
+
+    def _mark_uavs_collided(self, uav_ids: List[int]) -> None:
+        """Mark UAVs as collided without removing them from uav_dict.
+
+        Sets collision_status according to the configured convention:
+        - active_high: 1=active → 0=collided
+        - collided_high: 0=active → 1=collided
+        Collided UAVs remain in the dict but are frozen (excluded from
+        dynamics/planning/control in future steps).
+        """
+        if not uav_ids:
+            return
+        convention = self.config.simulator.collision_status_convention
+        collided_value = 0 if convention == "active_high" else 1
+        for uid in uav_ids:
+            uav = self.atc.uav_dict.get(uid)
+            if uav is not None:
+                uav.collision_status = collided_value
+                uav.operational = False
+                uav.vx = 0.0
+                uav.vy = 0.0
+                uav.vz = 0.0
+                uav.current_speed = 0.0
 
     def get_learning_uav_id(self) -> Optional[int]:
         """

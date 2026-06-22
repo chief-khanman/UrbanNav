@@ -62,11 +62,26 @@ UAV_TYPE_REGISTRY: Dict[str, 'UAVTypeConfig'] = {}  # populated after UAVTypeCon
 
 
 
+VALID_COLLISION_CONVENTIONS = {"active_high", "collided_high"}
+
+
 class UAMSimulatorConfig(BaseModel):
     dt: float
     total_timestep: int
     mode: str   # '2D' or '3D'
     seed: int
+    persist_collided_uavs: bool = False
+    collision_status_convention: str = "active_high"
+
+    @field_validator("collision_status_convention")
+    @classmethod
+    def validate_collision_convention(cls, v: str) -> str:
+        if v not in VALID_COLLISION_CONVENTIONS:
+            raise ValueError(
+                f"collision_status_convention must be one of "
+                f"{VALID_COLLISION_CONVENTIONS}, got '{v}'"
+            )
+        return v
 
 
 class LoggingConfig(BaseModel):

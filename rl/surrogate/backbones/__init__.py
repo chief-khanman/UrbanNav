@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import Dict, Type
 
+from rl.surrogate.backbones.dual_graph_gnn import DualGraphGNN
 from rl.surrogate.backbones.gnn_backbone import GNNSurrogateBackbone
 from rl.surrogate.backbones.graph_flow_gnn import GraphFlowGNN, GraphFlowRecurrentGNN
 from rl.surrogate.backbones.surrogate_template import SurrogateModel
@@ -22,6 +23,7 @@ BACKBONE_REGISTRY: Dict[str, Type[SurrogateModel]] = {
     'GNN': GNNSurrogateBackbone,
     'graph_flow': GraphFlowGNN,
     'graph_flow_recurrent': GraphFlowRecurrentGNN,
+    'dual_graph': DualGraphGNN,
 }
 
 __all__ = [
@@ -29,5 +31,6 @@ __all__ = [
     'GNNSurrogateBackbone',
     'GraphFlowGNN',
     'GraphFlowRecurrentGNN',
+    'DualGraphGNN',
     'BACKBONE_REGISTRY',
 ]

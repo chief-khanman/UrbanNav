@@ -121,8 +121,62 @@ def conservation_projection(
 class GraphFlowGNN(SurrogateModel):
     """Encode-process-decode GNN for vertiport-edge UAV flow prediction.
 
-    Predicts residual changes in node/edge UAV counts and applies a hard
-    conservation projection to ensure total UAV count is preserved.
+    Nodes = vertiports, edges = flight paths.  Predicts next-step node and
+    edge attributes (UAV counts) with a hard conservation constraint
+    ensuring total UAV count is preserved across timesteps.
+
+    **Papers and inspirations:**
+
+    Architecture:
+    - **GNS / Learning to Simulate** (Sanchez-Gonzalez et al., ICML 2020,
+      https://arxiv.org/abs/2002.09405):
+      Encode-process-decode pattern for learned physics simulation.  Our
+      three-stage pipeline (encoder MLPs → message-passing blocks → decoder
+      MLPs) follows this template.  Noise injection during training (adding
+      Gaussian noise to input node/edge features) is borrowed from GNS to
+      stabilize autoregressive rollout at inference time.
+
+    - **MeshGraphNets** (Pfaff et al., ICLR 2021,
+      https://arxiv.org/abs/2010.03409):
+      Edge→node→global message-passing structure with residual connections
+      and LayerNorm.  Our _MessagePassingBlock directly implements this
+      three-level update pattern.  Residual decoding (predicting deltas
+      rather than absolute values) also follows MeshGraphNets.
+
+    Conservation:
+    - **Beucler et al.** (ICML 2019, https://arxiv.org/abs/1906.06622):
+      Hard architectural constraint for conservation in neural network
+      emulators (climate physics).  Demonstrated that post-network
+      projection achieves conservation to machine precision, outperforming
+      soft loss penalties.  Our conservation_projection() implements this
+      approach: clamp negatives, then proportionally rescale so
+      sum(node_uavs) + sum(edge_uavs) = total_uavs.
+
+    - **KCLNet** (Xu et al., AAAI 2026, https://arxiv.org/abs/2603.24101):
+      Conservation enforced within message-passing architecture via
+      current-embedding constraints at each depth.  Validates our design
+      choice of node-level conservation at vertiport junctions (analogous
+      to Kirchhoff's Current Law at electrical nodes).
+
+    - **GNN-ODFill** (Zhang et al., 2025,
+      https://doi.org/10.1016/j.patcog.2025.111470):
+      GNN with hard flow conservation constraints for transportation
+      origin-destination matrix completion.  Closest domain match to our
+      vertiport network flow prediction — confirms hard constraints work
+      in hub-and-spoke transit networks.
+
+    Domain relevance:
+    - **T-GCN** (Zhao et al., 2019, https://arxiv.org/abs/1811.05320):
+      GCN + GRU for traffic prediction on road networks.  Validates the
+      spatial-GNN approach for transportation flow forecasting.
+
+    - **DCRNN** (Li et al., ICLR 2018, https://arxiv.org/abs/1707.01926):
+      Scheduled sampling during autoregressive training to reduce exposure
+      bias.  Applicable to future multi-step training improvements.
+
+    - **STGCN** (Yu et al., IJCAI 2018, https://arxiv.org/abs/1709.04875):
+      Pure convolutional spatiotemporal approach (no RNN), demonstrating
+      faster training than recurrent alternatives for traffic forecasting.
     """
 
     # Indices into node/edge feature vectors for the UAV-count channels
@@ -226,6 +280,29 @@ class GraphFlowRecurrentGNN(GraphFlowGNN):
 
     Maintains hidden states across timesteps to capture multi-step transit
     delays (a UAV takes several steps to traverse an edge).
+
+    **Papers and inspirations (in addition to GraphFlowGNN citations):**
+
+    Temporal extensions:
+    - **T-GCN** (Zhao et al., 2019, https://arxiv.org/abs/1811.05320):
+      GCN + GRU hybrid — spatial graph convolution captures topology,
+      GRU captures temporal dynamics.  Our per-node GRU cell follows
+      this pattern: after spatial message passing, each node's hidden
+      state is updated via GRUCell(h_spatial, h_prev_temporal).
+
+    - **DCRNN** (Li et al., ICLR 2018, https://arxiv.org/abs/1707.01926):
+      Diffusion convolution + GRU encoder-decoder with scheduled sampling.
+      Demonstrated 12-15% improvement over non-temporal baselines on
+      traffic forecasting.  Motivates our temporal extension for capturing
+      edge transit delays (UAVs take multiple steps to fly between
+      vertiports, creating temporal dependencies the stateless variant
+      cannot model).
+
+    - **TMS-GNN** (Baghbani et al., 2025,
+      https://doi.org/10.1016/j.trc.2025.105111):
+      Multistep GNN with scheduled sampling for bus network passenger
+      flow.  Addresses autoregressive exposure bias — relevant for
+      future improvements to our multi-step rollout training.
     """
 
     def __init__(

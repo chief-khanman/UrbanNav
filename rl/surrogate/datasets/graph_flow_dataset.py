@@ -21,7 +21,7 @@ import math
 import os
 from itertools import product
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -218,14 +218,30 @@ class GraphFlowDataset(torch.utils.data.Dataset):
         return self._pairs[idx]
 
     @classmethod
-    def from_logs_root(cls, logs_root: str, **kwargs) -> "GraphFlowDataset":
-        """Build from every episode under logs_root that has step_history.json."""
-        root = Path(logs_root)
-        if not root.exists():
-            return cls([], **kwargs)
-        dirs = sorted(
-            str(p)
-            for p in root.iterdir()
-            if p.is_dir() and (p / "step_history.json").exists()
-        )
+    def from_logs_root(
+        cls, logs_root: Union[str, List[str]], **kwargs
+    ) -> "GraphFlowDataset":
+        """Build from every episode under logs_root that has step_history.json.
+
+        Args:
+            logs_root: Single path or list of paths.  When a list is given,
+                all directories are scanned and their episodes are merged
+                into one dataset — this enables mixing data from different
+                simulator configurations in a single training run.
+        """
+        if isinstance(logs_root, str):
+            logs_root = [logs_root]
+
+        dirs: List[str] = []
+        for root_path in logs_root:
+            root = Path(root_path)
+            if not root.exists():
+                continue
+            dirs.extend(
+                sorted(
+                    str(p)
+                    for p in root.iterdir()
+                    if p.is_dir() and (p / "step_history.json").exists()
+                )
+            )
         return cls(dirs, **kwargs)
