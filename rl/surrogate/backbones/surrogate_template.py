@@ -26,6 +26,18 @@ import torch.nn as nn
 class SurrogateModel(nn.Module):
     """Abstract base for all surrogate backbones registered in BACKBONE_REGISTRY."""
 
+    def predict_graph_next_state(self, graph: Any) -> Any:
+        """Predict next-step node and edge attributes on a vertiport graph.
+
+        Args:
+            graph: torch_geometric.data.Data with node/edge attributes
+                   representing the current vertiport network state.
+
+        Returns:
+            torch_geometric.data.Data with predicted next-step attributes.
+        """
+        raise NotImplementedError
+
     @abstractmethod
     def predict_next_state(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         """Predict the per-UAV state at t+1.

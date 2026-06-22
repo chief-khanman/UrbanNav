@@ -28,9 +28,10 @@ from torch.utils.data import DataLoader, random_split
 
 from rl.surrogate.backbones import BACKBONE_REGISTRY, SurrogateModel
 from rl.surrogate.datasets.episode_outcome_dataset import EpisodeOutcomeDataset
+from rl.surrogate.datasets.graph_flow_dataset import GraphFlowDataset
 from rl.surrogate.datasets.trajectory_dataset import TrajectoryDataset
 
-VALID_TASKS = ('next_state', 'episode_outcome')
+VALID_TASKS = ('next_state', 'episode_outcome', 'graph_flow')
 
 
 def _split(dataset, val_fraction: float, seed: int) -> Tuple:
@@ -155,6 +156,90 @@ def train_episode_outcome(
     return history
 
 
+def train_graph_flow(
+    model: SurrogateModel,
+    dataset: GraphFlowDataset,
+    epochs: int,
+    batch_size: int,
+    learning_rate: float,
+    val_fraction: float,
+    seed: int,
+    device: torch.device,
+    conservation_weight: float = 10.0,
+    verbose: int = 1,
+) -> Dict[str, List[float]]:
+    """Train predict_graph_next_state on (graph_t, graph_t+1) pairs."""
+    train_ds, val_ds = _split(dataset, val_fraction, seed)
+    train_loader = DataLoader(train_ds, batch_size=1, shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=1) if val_ds is not None else None
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+    loss_fn = nn.MSELoss()
+    history: Dict[str, List[float]] = {
+        'train_loss': [], 'val_loss': [], 'conservation_violation': [],
+    }
+    model.to(device)
+
+    for epoch in range(1, epochs + 1):
+        model.train()
+        train_losses: List[float] = []
+        cons_violations: List[float] = []
+
+        for (g_t, g_tp1) in train_loader:
+            g_t = g_t.to(device)
+            g_tp1 = g_tp1.to(device)
+
+            pred = model.predict_graph_next_state(g_t)
+
+            node_loss = loss_fn(pred.x, g_tp1.x)
+            edge_loss = loss_fn(pred.edge_attr, g_tp1.edge_attr)
+            recon_loss = node_loss + edge_loss
+
+            pred_total = pred.x[:, 0].sum() + pred.x[:, 1].sum() + pred.edge_attr[:, 0].sum()
+            target_total = g_t.total_uavs.squeeze()
+            cons_loss = (pred_total - target_total).pow(2)
+
+            loss = recon_loss + conservation_weight * cons_loss
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            train_losses.append(recon_loss.item())
+            cons_violations.append(cons_loss.item())
+
+        scheduler.step()
+
+        avg_train = float(sum(train_losses) / max(len(train_losses), 1))
+        avg_cons = float(sum(cons_violations) / max(len(cons_violations), 1))
+        history['train_loss'].append(avg_train)
+        history['conservation_violation'].append(avg_cons)
+
+        val_msg = ''
+        if val_loader is not None:
+            model.eval()
+            val_losses: List[float] = []
+            with torch.no_grad():
+                for (g_t, g_tp1) in val_loader:
+                    g_t = g_t.to(device)
+                    g_tp1 = g_tp1.to(device)
+                    pred = model.predict_graph_next_state(g_t)
+                    val_losses.append(
+                        (loss_fn(pred.x, g_tp1.x) + loss_fn(pred.edge_attr, g_tp1.edge_attr)).item()
+                    )
+            avg_val = float(sum(val_losses) / max(len(val_losses), 1))
+            history['val_loss'].append(avg_val)
+            val_msg = f' | val_loss={avg_val:.6f}'
+
+        if verbose > 0:
+            print(
+                f'[graph_flow] epoch {epoch:3d}/{epochs} | '
+                f'train_loss={avg_train:.6f} | cons_viol={avg_cons:.8f}{val_msg}'
+            )
+
+    return history
+
+
 def train(
     task: str,
     backbone: str,
@@ -166,6 +251,9 @@ def train(
     seed: int = 0,
     device: str = 'cpu',
     backbone_kwargs: dict = None,
+    edge_type: str = 'full_mesh',
+    distance_threshold: float = 0.0,
+    conservation_weight: float = 10.0,
     verbose: int = 1,
 ) -> Tuple[SurrogateModel, Dict[str, List[float]]]:
     """Entry point: build dataset + backbone, run the matching trainer.
@@ -190,6 +278,20 @@ def train(
         history = train_next_state(
             model, dataset, epochs, batch_size, learning_rate,
             val_fraction, seed, dev, verbose,
+        )
+    elif task == 'graph_flow':
+        dataset = GraphFlowDataset.from_logs_root(
+            logs_root, edge_type=edge_type, distance_threshold=distance_threshold,
+        )
+        if len(dataset) == 0:
+            raise RuntimeError(
+                f"No graph-flow transitions found under {logs_root!r}. "
+                "Ensure MetricsCollector records vertiport/edge snapshots."
+            )
+        model = BACKBONE_REGISTRY[backbone](**kwargs)
+        history = train_graph_flow(
+            model, dataset, epochs, batch_size, learning_rate,
+            val_fraction, seed, dev, conservation_weight, verbose,
         )
     else:
         dataset = EpisodeOutcomeDataset.from_logs_root(logs_root)
@@ -219,6 +321,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument('--seed', type=int, default=0)
     p.add_argument('--device', default='cpu')
     p.add_argument('--hidden-dim', type=int, default=32)
+    p.add_argument('--edge-type', default='full_mesh', choices=['full_mesh', 'demand_driven', 'distance_threshold'])
+    p.add_argument('--distance-threshold', type=float, default=0.0)
+    p.add_argument('--conservation-weight', type=float, default=10.0)
     return p
 
 
@@ -235,6 +340,9 @@ def main() -> None:
         seed=args.seed,
         device=args.device,
         backbone_kwargs={'hidden_dim': args.hidden_dim},
+        edge_type=args.edge_type,
+        distance_threshold=args.distance_threshold,
+        conservation_weight=args.conservation_weight,
     )
     print('Final losses:', history)
 

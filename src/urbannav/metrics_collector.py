@@ -114,12 +114,57 @@ class MetricsCollector:
                 if ra_ids:
                     collision_summary['ra_collision_ids'].append(uid)
 
+        # --- Vertiport snapshots (graph-level surrogate data) ---
+        vertiport_snapshots: Dict[int, Dict[str, Any]] = {}
+        vertiport_list = state.airspace_state or []
+        for vp_idx, vp in enumerate(vertiport_list):
+            vertiport_snapshots[vp_idx] = {
+                'x': vp.location.x,
+                'y': vp.location.y,
+                'n_grounded': len(vp.uav_id_list),
+                'n_landing_queue': len(vp.landing_queue),
+                'capacity': vp.landing_takeoff_capacity,
+            }
+
+        # --- Edge snapshots: count in-flight UAVs per OD vertiport pair ---
+        edge_snapshots: Dict[str, Dict[str, Any]] = {}
+        vp_id_to_idx: Dict[int, int] = {id(vp): idx for idx, vp in enumerate(vertiport_list)}
+        for uav_id, uav in uav_dict.items():
+            if not getattr(uav, 'uav_in_flight', False):
+                continue
+            src_vp = getattr(uav, 'start_vertiport', None)
+            dst_vp = getattr(uav, 'end_vertiport', None)
+            if src_vp is None or dst_vp is None:
+                continue
+            src_idx = vp_id_to_idx.get(id(src_vp))
+            dst_idx = vp_id_to_idx.get(id(dst_vp))
+            if src_idx is None or dst_idx is None:
+                continue
+            edge_key = f"{src_idx}->{dst_idx}"
+            if edge_key not in edge_snapshots:
+                total_dist = src_vp.location.distance(dst_vp.location)
+                edge_snapshots[edge_key] = {
+                    'src': src_idx,
+                    'dst': dst_idx,
+                    'n_in_transit': 0,
+                    'progress_sum': 0.0,
+                    'edge_distance': total_dist,
+                }
+            entry = edge_snapshots[edge_key]
+            entry['n_in_transit'] += 1
+            total_dist = entry['edge_distance']
+            if total_dist > 0:
+                covered = uav.current_position.distance(src_vp.location)
+                entry['progress_sum'] += min(covered / total_dist, 1.0)
+
         step_record: Dict[str, Any] = {
             'step':            state.currentstep,
             'num_active_uavs': len(uav_dict),
             'uavs':            uav_snapshots,
             'actions':         _serialize(actions or {}),
             'collisions':      collision_summary,
+            'vertiports':      vertiport_snapshots,
+            'edges':           edge_snapshots,
         }
         self._steps.append(step_record)
 
