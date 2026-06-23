@@ -317,7 +317,8 @@ class ATC():
         # UAV
         landing_uav = self.uav_dict[landing_uav_id]
         landing_uav.has_reached_end = True
-        landing_uav.operational = False 
+        landing_uav.set_mission_complete_status(True)
+        landing_uav.operational = False
         landing_uav.uav_in_flight = False 
         #
         # Add UAV to Vertiport and mark as no longer in flight
