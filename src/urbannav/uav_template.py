@@ -54,6 +54,12 @@ class UAV_template(ABC):
         
         # UAV incidence counter/metric
         self.nmac_count:int = 0
+        # Number of missions completed by this UAV within the current episode.
+        # Persists across reassign_new_mission() calls (unlike
+        # current_mission_complete_status, which assign_start_end() resets to
+        # False for each new mission) - incremented by MetricsCollector.record()
+        # on each False->True transition of current_mission_complete_status.
+        self.num_missions_completed_in_episode:int = 0
         # collision_status: configurable polarity via collision_status_convention.
         # "active_high": 1=active, 0=collided. "collided_high": 0=active, 1=collided.
         # Initialized to the "active" value; set by simulator_manager on collision.
