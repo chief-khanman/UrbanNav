@@ -188,12 +188,14 @@ def _render_from_logs(
     render_dir = os.path.join(output_dir, "renders")
     os.makedirs(render_dir, exist_ok=True)
 
+    mp4_only = config_dict.get("rendering", {}).get("mp4_only", False)
     render_cfg = RenderingConfig(
         enabled=True,
         mode="offline",
         output_dir=render_dir,
         output_filename=f"run_{run_id}",
         frame_skip=0,
+        mp4_only=mp4_only,
     )
 
     from urbannav.renderer import Renderer

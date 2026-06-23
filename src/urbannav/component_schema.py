@@ -100,6 +100,8 @@ class RenderingConfig(BaseModel):
     frame_skip:
         Render every (frame_skip + 1) steps.  0 = every step, 9 = every 10th step.
         Increase to keep animation file sizes manageable for long episodes.
+    mp4_only:
+        If True, skip the GIF save and write only the MP4 (requires ffmpeg).
     """
     enabled: bool = False
     mode: str = 'offline'
@@ -107,6 +109,7 @@ class RenderingConfig(BaseModel):
     output_filename: str = 'episode'
     realtime_sleep: float = 0.01
     frame_skip: int = 4
+    mp4_only: bool = False
 
     @field_validator('mode')
     @classmethod

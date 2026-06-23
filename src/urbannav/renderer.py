@@ -60,6 +60,7 @@ class Renderer:
         self.output_filename: str    = cfg.output_filename
         self.realtime_sleep: float   = cfg.realtime_sleep
         self.frame_skip: int         = cfg.frame_skip
+        self.mp4_only: bool          = cfg.mp4_only
 
         self._sim_mode: str          = simulator_mode    # '2D' or '3D'
         self._airspace               = None
@@ -131,7 +132,7 @@ class Renderer:
         """Build an animation from collected frames and write it to disk.
 
         Tries GIF first (no external dependencies via Pillow), then MP4
-        (requires ffmpeg).
+        (requires ffmpeg). Set RenderingConfig.mp4_only=True to skip the GIF.
         """
         if not self.enabled or self.mode not in ('offline', 'both'):
             return
@@ -165,12 +166,13 @@ class Renderer:
         )
 
         # --- GIF (always attempted first — no ffmpeg needed) ---
-        gif_path = f'{out_base}.gif'
-        try:
-            ani.save(gif_path, writer=PillowWriter(fps=10), dpi=150)
-            print(f'[Renderer] Saved → {gif_path}')
-        except Exception as exc:
-            print(f'[Renderer] GIF save failed: {exc}')
+        if not self.mp4_only:
+            gif_path = f'{out_base}.gif'
+            try:
+                ani.save(gif_path, writer=PillowWriter(fps=10), dpi=150)
+                print(f'[Renderer] Saved → {gif_path}')
+            except Exception as exc:
+                print(f'[Renderer] GIF save failed: {exc}')
 
         # --- MP4 (requires ffmpeg) ---
         try:

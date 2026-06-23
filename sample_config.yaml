@@ -26,6 +26,7 @@ rendering:
   output_filename: 'episode'
   realtime_sleep: 0.01  # seconds to pause between real-time frames
   frame_skip: 4         # render every (frame_skip+1) steps; 0=every step, 4=every 5th
+  mp4_only: false       # if true, skip the GIF save and write only the MP4 (requires ffmpeg)
 #### VERTIPORT CONFIG ####
 vertiport:
   number_of_landing_pad: 3

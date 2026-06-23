@@ -1,0 +1,41 @@
+# Base config for surrogate-model data collection.
+# Swept by run_surrogate_sweep.py over fleet_composition.0.count (UAV count).
+# component_schema.py structure has to respect this config.yaml
+
+#### UAM CONFIG ####
+simulator:
+  dt: 0.1
+  total_timestep: 25000
+  mode: '2D'
+  seed: 123
+#### LOGGING CONFIG ####
+logging:
+  enabled: true
+  log_dir: 'logs'       # overridden per-run by parallel_runner.py
+#### RENDERING CONFIG ####
+rendering:
+  enabled: true
+  mode: 'offline'
+  output_dir: 'renders'
+  output_filename: 'episode'
+  realtime_sleep: 0.01
+  frame_skip: 4
+  mp4_only: false        # skip GIF, save only MP4
+#### VERTIPORT CONFIG ####
+vertiport:
+  number_of_landing_pad: 4
+#### AIRSPACE CONFIG ####
+airspace:
+  location_name: 'Austin, Texas, USA'
+  number_of_vertiports: 20
+  vertiport_tag_list: [['building', 'commercial']]
+  airspace_restricted_area_tag_list: []
+
+fleet_composition:
+#### UAV FLEET INSTANCE CONFIG ####
+  - type_name: STANDARD
+    count: 25            # swept: 25, 50, 75, 100
+    dynamics: PointMass
+    controller: PIDPointMassController
+    sensor: PartialSensor
+    planner: PointMass-PID
