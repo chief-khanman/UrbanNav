@@ -21,6 +21,11 @@ class MetricsCollector:
 
     def __init__(self) -> None:
         self._steps: List[Dict[str, Any]] = []
+        # Tracks each UAV's mission_complete status as of the previous record()
+        # call, so a new mission assigned mid-episode (which resets
+        # current_mission_complete_status back to False) doesn't get missed -
+        # only a False->True transition counts as a completed mission.
+        self._prev_mission_status: Dict[int, bool] = {}
 
     # ------------------------------------------------------------------
     # Primary interface
@@ -67,6 +72,21 @@ class MetricsCollector:
             except AttributeError:
                 dist_to_goal = None
 
+            # Count a mission as completed on the False->True transition of
+            # current_mission_complete_status, rather than just sampling the
+            # raw status each step. Without this, a UAV that completes a
+            # mission and is reassigned a new one within the same episode
+            # (assign_start_end() resets current_mission_complete_status to
+            # False) would only ever show its latest mission's status, losing
+            # every mission completed earlier in the episode.
+            curr_mission_complete = getattr(uav, 'current_mission_complete_status', False)
+            prev_mission_complete = self._prev_mission_status.get(uav_id, False)
+            if curr_mission_complete and not prev_mission_complete:
+                uav.num_missions_completed_in_episode = (
+                    getattr(uav, 'num_missions_completed_in_episode', 0) + 1
+                )
+            self._prev_mission_status[uav_id] = curr_mission_complete
+
             uav_snapshots[uav_id] = {
                 'x':               pos.x,
                 'y':               pos.y,
@@ -79,7 +99,8 @@ class MetricsCollector:
                 #TODO: fix logic for incrementing nmac_count - sensor[uav_instance].get_nmac() -> increment uav.nmac_count
                 'nmac_count':      getattr(uav, 'nmac_count', 0), #! sensor does not increment NMAC count
                 'collision_status': getattr(uav, 'collision_status', 1),
-                'mission_complete': getattr(uav, 'current_mission_complete_status', False),
+                'mission_complete': curr_mission_complete,
+                'num_missions_completed': getattr(uav, 'num_missions_completed_in_episode', 0),
                 'dist_to_goal':    dist_to_goal,
             }
 
@@ -172,6 +193,7 @@ class MetricsCollector:
     def reset(self) -> None:
         """Clear all accumulated step data for a new episode."""
         self._steps = []
+        self._prev_mission_status = {}
 
     # ------------------------------------------------------------------
     # Metrics
@@ -185,7 +207,7 @@ class MetricsCollector:
         Returns:
             Dict with keys:
               total_steps, total_nmac_events, total_uav_collision_events,
-              total_ra_collision_events, unique_uavs, missions_completed,
+              total_ra_collision_events, unique_uavs, avg_missions_completed,
               avg_speed, min_speed, max_speed,
               avg_dist_to_goal_final, peak_active_uavs.
         """
@@ -202,7 +224,12 @@ class MetricsCollector:
         for s in self._steps:
             all_uav_ids.update(s['uavs'].keys())
 
-        missions_completed = 0
+        # Missions completed per UAV (num_missions_completed is a running
+        # count maintained on the UAV by record(), incremented on every
+        # False→True transition of mission_complete - so taking each UAV's
+        # own last snapshot already reflects every mission it completed
+        # during the episode, not just its latest one).
+        mission_counts: List[int] = []
         all_speeds: List[float] = []
 
         # Final-step distance-to-goal per UAV
@@ -214,15 +241,7 @@ class MetricsCollector:
                 s['uavs'][uav_id] for s in self._steps if uav_id in s['uavs']
             ]
             if uav_step_snapshots:
-                # Count rising edges (False→True) to handle multiple missions per UAV
-                # and avoid double-counting consecutive True steps (UAV waiting to be
-                # reassigned can stay mission_complete=True for several steps).
-                prev = False
-                for snap in uav_step_snapshots:
-                    curr = snap['mission_complete']
-                    if curr and not prev:
-                        missions_completed += 1
-                    prev = curr
+                mission_counts.append(uav_step_snapshots[-1]['num_missions_completed'])
                 all_speeds.extend(snap['speed'] for snap in uav_step_snapshots)
 
             if uav_id in last_step['uavs']:
@@ -230,6 +249,7 @@ class MetricsCollector:
                 if dist is not None:
                     final_dists.append(dist)
 
+        avg_missions_completed = float(np.mean(mission_counts)) if mission_counts else 0.0
         avg_speed = float(np.mean(all_speeds)) if all_speeds else 0.0
         min_speed = float(np.min(all_speeds))  if all_speeds else 0.0
         max_speed = float(np.max(all_speeds))  if all_speeds else 0.0
@@ -241,7 +261,7 @@ class MetricsCollector:
             'total_uav_collision_events': total_uav_col_events,
             'total_ra_collision_events':  total_ra_col_events,
             'unique_uavs':              len(all_uav_ids),
-            'missions_completed':       missions_completed,
+            'avg_missions_completed':   avg_missions_completed,
             'peak_active_uavs':         peak_active_uavs,
             'avg_speed':                avg_speed,
             'min_speed':                min_speed,
