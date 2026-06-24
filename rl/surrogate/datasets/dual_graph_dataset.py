@@ -40,9 +40,11 @@ from torch_geometric.data import HeteroData
 from torch.utils.data import Dataset
 
 # --- Feature dimensions ---
+
 UAV_NODE_KEYS: Tuple[str, ...] = (
     "x", "y", "z", "vx", "vy", "vz", "speed", "heading", "collision_status",
 )
+
 UAV_NODE_DIM: int = len(UAV_NODE_KEYS)
 
 UAV_EDGE_DIM: int = 4  # [relative_distance, dx, dy, dz]
@@ -52,7 +54,7 @@ VP_NODE_DIM: int = len(VP_NODE_KEYS)
 
 VALID_UAV_EDGE_TYPES = {"distance_threshold", "fully_connected"}
 
-
+#TODO: add docstring 
 def _build_uav_edges_fully_connected(n: int) -> torch.Tensor:
     if n < 2:
         return torch.zeros((2, 0), dtype=torch.long)

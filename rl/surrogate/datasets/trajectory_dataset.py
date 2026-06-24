@@ -145,6 +145,7 @@ class TrajectoryDataset(Dataset):
         """Return (episode_dir, step_t, uav_id) for the transition at idx."""
         return self._source_keys[idx]
 
+    # from LOG directories root, example: ~/Dev/UrbanNav/logs/sweep<number>/run<hash>/episode_metric.json
     @classmethod
     def from_logs_root(
         cls, logs_root: Union[str, List[str]], **kwargs

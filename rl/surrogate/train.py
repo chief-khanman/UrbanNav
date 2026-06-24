@@ -20,7 +20,7 @@ intentionally deferred).
 from __future__ import annotations
 
 import argparse
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -33,6 +33,15 @@ from rl.surrogate.datasets.graph_flow_dataset import GraphFlowDataset
 from rl.surrogate.datasets.trajectory_dataset import TrajectoryDataset
 
 VALID_TASKS = ('next_state', 'episode_outcome', 'graph_flow', 'dual_graph')
+
+
+def _auto_device() -> str:
+    """Pick the best available device: cuda > mps > cpu."""
+    if torch.cuda.is_available():
+        return 'cuda'
+    if torch.backends.mps.is_available():
+        return 'mps'
+    return 'cpu'
 
 
 def _split(dataset, val_fraction: float, seed: int) -> Tuple:
@@ -171,8 +180,11 @@ def train_graph_flow(
 ) -> Dict[str, List[float]]:
     """Train predict_graph_next_state on (graph_t, graph_t+1) pairs."""
     train_ds, val_ds = _split(dataset, val_fraction, seed)
-    train_loader = DataLoader(train_ds, batch_size=1, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=1) if val_ds is not None else None
+    train_loader = DataLoader(train_ds, batch_size=1, shuffle=True, collate_fn=lambda batch: batch[0])
+    val_loader = (
+        DataLoader(val_ds, batch_size=1, collate_fn=lambda batch: batch[0])
+        if val_ds is not None else None
+    )
 
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
@@ -255,8 +267,11 @@ def train_dual_graph(
 ) -> Dict[str, List[float]]:
     """Train dual-graph model on (hetero_t, hetero_t+1) pairs."""
     train_ds, val_ds = _split(dataset, val_fraction, seed)
-    train_loader = DataLoader(train_ds, batch_size=1, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=1) if val_ds is not None else None
+    train_loader = DataLoader(train_ds, batch_size=1, shuffle=True, collate_fn=lambda batch: batch[0])
+    val_loader = (
+        DataLoader(val_ds, batch_size=1, collate_fn=lambda batch: batch[0])
+        if val_ds is not None else None
+    )
 
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
@@ -330,13 +345,13 @@ def train_dual_graph(
 def train(
     task: str,
     backbone: str,
-    logs_root: str,
+    logs_root: Union[str, List[str]],
     epochs: int = 10,
     batch_size: int = 32,
     learning_rate: float = 1e-3,
     val_fraction: float = 0.2,
     seed: int = 0,
-    device: str = 'cpu',
+    device: str = _auto_device(),
     backbone_kwargs: dict = None,
     edge_type: str = 'full_mesh',
     distance_threshold: float = 0.0,
@@ -412,13 +427,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description='Train a surrogate backbone on UrbanNav rollouts.')
     p.add_argument('--task', required=True, choices=list(VALID_TASKS))
     p.add_argument('--backbone', required=True, choices=list(BACKBONE_REGISTRY.keys()))
-    p.add_argument('--logs-root', required=True)
+    p.add_argument('--logs-root', required=True, nargs='+', help='One or more log root directories; episodes from all are merged into one dataset.')
     p.add_argument('--epochs', type=int, default=10)
     p.add_argument('--batch-size', type=int, default=32)
     p.add_argument('--learning-rate', type=float, default=1e-3)
     p.add_argument('--val-fraction', type=float, default=0.2)
     p.add_argument('--seed', type=int, default=0)
-    p.add_argument('--device', default='cpu')
+    p.add_argument('--device', default=_auto_device())
     p.add_argument('--hidden-dim', type=int, default=32)
     p.add_argument('--edge-type', default='full_mesh', choices=['full_mesh', 'demand_driven', 'distance_threshold'])
     p.add_argument('--distance-threshold', type=float, default=0.0)

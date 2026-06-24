@@ -239,3 +239,5 @@ comes from `Airspace` which is built after the sensor map exists.
   they usually describe the intended direction already.
 - Code style is enforced by `pre-commit` (black/isort/flake8, 100-char lines) — match that
   formatting in new code even if you don't run the hooks locally.
+
+- All functions should contain docstring, for simulator related functions docstring should explain the purpose and usage. For learning (ML, DL, RL) related functions docstrings should define purpose of function, how its used in context of models, their input and outputs, the transformation performed by the function. If function is implementing a model then should include the papers that were sources/inspiration for the model, with link link to paper. For models specifically, this should be right after class declaration. For mathematical functions invoked in model, each function should have explanation of the math and its operation, its need and how it helps the model. 
