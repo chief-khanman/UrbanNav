@@ -27,7 +27,7 @@ vertiport:
 #### AIRSPACE CONFIG ####
 airspace:
   location_name: 'Austin, Texas, USA'
-  number_of_vertiports: 20
+  number_of_vertiports: 100 
   vertiport_tag_list: [['building', 'commercial']]
   airspace_restricted_area_tag_list: []
 
