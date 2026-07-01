@@ -31,7 +31,7 @@ class UAMSimulator:
         '''
 
         # config - file with ATC, airspace, vertiport, UAV
-        self.config = UAMConfig.load_from_yaml(config_path)
+        self.config = self._load_config(config_path)
         # total_time_step
         self.total_timestep = self.config.simulator.total_timestep
 
@@ -64,15 +64,35 @@ class UAMSimulator:
         else:
             zone_region_map = None
 
-        self.simulator_manager = SimulatorManager(
-            self.config, lambda_matrix, vertiport_region_map, zone_region_map
+        self.simulator_manager = self._build_simulator_manager(
+            lambda_matrix, vertiport_region_map, zone_region_map
         )
 
         ##### Rendering #####
-        self.renderer = Renderer(self.config.rendering, self.config.simulator.mode)
+        self.renderer = self._build_renderer()
 
         ##### Metrics #####
         self.logger = Logger(self.config.logging, full_config=self.config)
+
+    def _load_config(self, config_path: str) -> UAMConfig:
+        """Load the root config object. Overridden by subclasses (e.g. a testbed
+        simulator) that use a different config schema/loader."""
+        return UAMConfig.load_from_yaml(config_path)
+
+    def _build_simulator_manager(
+        self,
+        lambda_matrix: Optional[np.ndarray],
+        vertiport_region_map: Optional[Dict[int, int]],
+        zone_region_map: Optional[Dict],
+    ) -> SimulatorManager:
+        """Construct the simulator manager. Overridden by subclasses that swap in an
+        alternate SimulatorManager (e.g. one built around a synthetic airspace)."""
+        return SimulatorManager(self.config, lambda_matrix, vertiport_region_map, zone_region_map)
+
+    def _build_renderer(self) -> Renderer:
+        """Construct the renderer. Overridden by subclasses that need custom drawing
+        (e.g. 3D-extruded synthetic buildings)."""
+        return Renderer(self.config.rendering, self.config.simulator.mode)
 
 
     def reset(self, rebuild_airspace: bool = True):

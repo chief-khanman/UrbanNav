@@ -19,3 +19,4 @@ renders
 /tensorboard_logs/
 /plots/
 /models/
+/rl/single_agent/checkpoints/

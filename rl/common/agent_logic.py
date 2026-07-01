@@ -44,7 +44,10 @@ def create_action_space(dynamics_name: str) -> spaces.Box:
 
 
 def create_observation_space(obs_type: str, n_intruder: int = 3) -> spaces.Box:
-    """Thin re-export of get_obs_space, kept here so callers only need this module."""
+    """Thin re-export of get_obs_space, kept here so callers only need this module.
+
+    Returns the same flat Box regardless of policy_arch (MLP/RNN/GNN/GNN_RNN) —
+    see rl/single_agent/policies/ for the extractors that reshape it."""
     return get_obs_space(obs_type, n_intruder)
 
 
@@ -277,7 +280,11 @@ def compute_reward(
         'r1'       -> r1
         'r1r2'     -> r1 + r2
         'r1r2r3'   -> r1 + r2 + r3
+        'r1r2r4'   -> r1 + r2 + r4       (goal + avoid-static, no avoid-agents term)
         'r1r2r3r4' -> r1 + r2 + r3 + r4
+
+    "Goal-reaching" always includes r2 (speed) — reaching the goal in the
+    shortest time is part of the goal objective, not a separate term.
 
     Terminal collision penalties (-100) are always applied on top, regardless
     of reward_type.
@@ -328,6 +335,7 @@ def compute_reward(
         'r1':       r1,
         'r1r2':     r1 + r2,
         'r1r2r3':   r1 + r2 + r3,
+        'r1r2r4':   r1 + r2 + r4,
         'r1r2r3r4': r1 + r2 + r3 + r4,
     }.get(reward_type, r1)
 

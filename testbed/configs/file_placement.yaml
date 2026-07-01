@@ -1,0 +1,41 @@
+# Testbed scenario driven by an explicit placement file instead of a generated
+# pattern — see testbed/configs/example_placement.txt and
+# testbed/placement.py:load_placement_file. Run from the repo root (placement_file
+# path is resolved relative to the current working directory, same convention as
+# UAMSimulator's od_matrix_path/zone_region_map_path).
+
+simulator:
+  dt: 1.0
+  total_timestep: 500
+  mode: '3D'
+  seed: 123
+
+logging:
+  enabled: true
+  log_dir: 'logs'
+
+rendering:
+  enabled: true
+  mode: 'offline'
+  output_dir: 'renders'
+  output_filename: 'testbed_file_placement'
+  realtime_sleep: 0.01
+  frame_skip: 4
+  mp4_only: false
+
+testbed_airspace:
+  placement_file: 'testbed/configs/example_placement.txt'
+  landing_pad_capacity: 1
+  building_width_default: 300.0
+  building_depth_default: 300.0
+  building_buffer_radius_default: 250.0
+  building_z_height_mean: 60.0
+  building_z_height_std: 15.0
+
+fleet_composition:
+  - type_name: STANDARD
+    count: 4
+    dynamics: PointMass
+    controller: PIDPointMassController
+    sensor: PartialSensor
+    planner: PointMass-PID

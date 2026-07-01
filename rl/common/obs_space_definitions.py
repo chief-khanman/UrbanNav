@@ -44,9 +44,11 @@ OBS_SPACE: List[str] = [
     'AGENT-N-INTRUDER-RA', # self + N intruders + RA     — shape (9 + 6·N + 1,)
 ]
 
-# Supported policy feature extractor architectures.
-# MLP is fully implemented.  GNN and RNN are stubs for future work.
-POLICY_ARCH: List[str] = ['MLP', 'GNN', 'RNN']
+# Policy feature-extractor architecture is now policy_arch-agnostic at the obs-space
+# level: every architecture (MLP / RNN / GNN / GNN_RNN) consumes the same flat Box
+# below and reshapes it into a sequence/graph internally
+# (rl/single_agent/policies/*_extractor.py). The authoritative list of architectures
+# is the --policy-arch argparse choices in rl/single_agent/single_agent_training.py.
 
 
 # ---------------------------------------------------------------------------
@@ -108,7 +110,6 @@ def obs_space_agent_n_intruder_ra(n: int) -> spaces.Box:
 def get_obs_space(
     obs_type: str,
     n_intruder: int = 3,
-    policy_arch: str = 'MLP',
 ) -> spaces.Box:
     """
     Return the Gymnasium observation space for the given obs_type.
@@ -117,31 +118,15 @@ def get_obs_space(
         obs_type:    One of the strings in OBS_SPACE.
         n_intruder:  Number of intruder slots for 'AGENT-N-INTRUDER*' types.
                      Ignored for non-N types.
-        policy_arch: 'MLP' returns a flat Box (default).
-                     'GNN' and 'RNN' are stubs — raise NotImplementedError
-                     until graph/sequence feature extractors are implemented.
 
     Returns:
-        gymnasium.spaces.Box matching the selected obs_type + policy_arch.
+        gymnasium.spaces.Box matching the selected obs_type. The same flat
+        Box is returned regardless of policy_arch — RNN/GNN/GNN_RNN feature
+        extractors reshape it internally (rl/single_agent/policies/).
 
     Raises:
-        ValueError          — unknown obs_type.
-        NotImplementedError — policy_arch is 'GNN' or 'RNN' (not yet implemented).
+        ValueError — unknown obs_type.
     """
-    if policy_arch not in POLICY_ARCH:
-        raise ValueError(
-            f"Unknown policy_arch '{policy_arch}'. Valid options: {POLICY_ARCH}"
-        )
-
-    if policy_arch in ('GNN', 'RNN'):
-        # TODO: GNN — build node/edge feature tensors from intruder + RA data
-        # TODO: RNN — build a sequence of intruder observations ordered by distance
-        raise NotImplementedError(
-            f"policy_arch='{policy_arch}' is not yet implemented. "
-            "Use policy_arch='MLP' for now."
-        )
-
-    # MLP path: flat Box for all obs types
     dispatch = {
         'AGENT':               obs_space_agent,
         'AGENT-INTRUDER':      obs_space_agent_intruder,

@@ -1,0 +1,17 @@
+# Explicit placement file for the testbed — see testbed/placement.py:load_placement_file.
+# One boundary row (x_min,x_max,y_min,y_max), then any number of vertiport/building
+# rows (x,y,z). Building footprint size/height come from testbed_airspace config
+# defaults (building_width_default/building_depth_default/building_z_height_mean/std),
+# not from this file — this file only supplies positions.
+
+boundary,-5000,5000,-5000,5000
+
+# vertiport,x,y,z
+vertiport,2000,0,1800
+vertiport,-2000,0,1800
+vertiport,0,2000,1800
+vertiport,0,-2000,1800
+
+# building,x,y,z
+building,0,0,0
+building,600,600,0

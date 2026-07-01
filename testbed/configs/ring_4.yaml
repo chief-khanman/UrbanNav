@@ -1,0 +1,48 @@
+# Testbed scenario: 4 vertiports at the corners of a square (ring pattern, n=4),
+# 4 STANDARD UAVs flying random missions among them. Diagonal/opposite missions
+# routinely cross near the center, where a synthetic building also sits — forcing
+# both UAV-UAV and UAV-restricted-area conflicts. See testbed/config_schema.py for
+# field meanings; loaded via testbed.testbed_simulator.TestbedSimulator.
+
+simulator:
+  dt: 1.0
+  total_timestep: 500
+  mode: '3D'
+  seed: 123
+
+logging:
+  enabled: true
+  log_dir: 'logs'
+
+rendering:
+  enabled: true
+  mode: 'offline'
+  output_dir: 'renders'
+  output_filename: 'testbed_ring_4'
+  realtime_sleep: 0.01
+  frame_skip: 4
+  mp4_only: false
+
+testbed_airspace:
+  pattern: 'ring'
+  num_vertiports: 4
+  center: [0.0, 0.0]
+  radius: 2000.0
+  start_angle: 0.7853981633974483   # pi/4 -> exact square corners
+  landing_pad_capacity: 1
+  altitude_range: [1500.0, 2000.0]
+  building_z_height_mean: 60.0
+  building_z_height_std: 15.0
+  buildings:
+    - center: [0.0, 0.0]
+      width: 400.0
+      depth: 400.0
+      buffer_radius: 300.0
+
+fleet_composition:
+  - type_name: STANDARD
+    count: 4
+    dynamics: PointMass
+    controller: PIDPointMassController
+    sensor: PartialSensor
+    planner: PointMass-PID

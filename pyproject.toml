@@ -12,7 +12,7 @@ dynamic = []
 
 [tool.setuptools.packages.find]
 where = ["src", "."]
-include = ["urbannav*", "rl*"]
+include = ["urbannav*", "rl*", "testbed*"]
 
 [tool.black]
 line-length = 100
@@ -21,7 +21,7 @@ target-version = ["py311"]
 [tool.isort]
 profile = "black"
 line_length = 100
-known_first_party = ["urbannav", "rl"]
+known_first_party = ["urbannav", "rl", "testbed"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "rl"]
+testpaths = ["tests", "rl", "testbed"]
