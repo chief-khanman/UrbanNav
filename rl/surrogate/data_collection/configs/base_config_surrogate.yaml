@@ -20,7 +20,7 @@ rendering:
   output_filename: 'episode'
   realtime_sleep: 0.01
   frame_skip: 4
-  mp4_only: false        # skip GIF, save only MP4
+  mp4_only: true        # skip GIF, save only MP4
 #### VERTIPORT CONFIG ####
 vertiport:
   number_of_landing_pad: 4
