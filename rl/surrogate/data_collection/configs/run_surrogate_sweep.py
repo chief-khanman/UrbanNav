@@ -21,7 +21,7 @@ from rl.surrogate.data_collection.parallel_runner import run_sweep
 BASE_CONFIG = Path(__file__).parent / "base_config_surrogate.yaml"
 
 SWEEP_PARAMS = {
-    "fleet_composition.0.count": [25, 50, 75, 100],
+    "fleet_composition.0.count": list(range(25, 101, 5)), 
 }
 
 
