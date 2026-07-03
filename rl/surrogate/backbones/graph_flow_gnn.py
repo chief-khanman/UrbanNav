@@ -51,9 +51,18 @@ class _MessagePassingBlock(nn.Module):
 
     def __init__(self, hidden_dim: int):
         super().__init__()
-        self.edge_mlp = _MLP(hidden_dim * 3 + hidden_dim, hidden_dim, hidden_dim)
-        self.node_mlp = _MLP(hidden_dim * 2, hidden_dim, hidden_dim)
-        self.global_mlp = _MLP(hidden_dim * 3, hidden_dim, hidden_dim)
+        self.edge_mlp = _MLP(hidden_dim * 3 + hidden_dim, # IN
+                             hidden_dim,                  # HIDDEN
+                             hidden_dim)                  # OUT
+        
+        self.node_mlp = _MLP(hidden_dim * 2,              # IN
+                             hidden_dim,                  # HIDDEN
+                             hidden_dim)                  # OUT
+        
+        self.global_mlp = _MLP(hidden_dim * 3,            # IN
+                               hidden_dim,                # HIDDEN
+                               hidden_dim)                # OUT
+        #TODO: change LayerNorm -> GraphNorm and compare results by keeping everything else the same 
         self.edge_norm = nn.LayerNorm(hidden_dim)
         self.node_norm = nn.LayerNorm(hidden_dim)
 
@@ -62,27 +71,41 @@ class _MessagePassingBlock(nn.Module):
         h_node: torch.Tensor,
         h_edge: torch.Tensor,
         h_global: torch.Tensor,
-        edge_index: torch.Tensor,
+        edge_index: torch.Tensor, #! edge_index: need to ensure we are using undirected graph - since UAVs flow in both direction at any given time step 
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        
         src, dst = edge_index[0], edge_index[1]
-        n_nodes = h_node.shape[0]
+        #! num_nodes: why is this unused 
+        num_nodes = h_node.shape[0]
 
         # Edge update: f_e([h_src, h_dst, h_edge, h_global])
-        h_global_exp = h_global.expand(h_edge.shape[0], -1)
-        edge_input = torch.cat([h_node[src], h_node[dst], h_edge, h_global_exp], dim=-1)
-        h_edge_new = self.edge_norm(h_edge + self.edge_mlp(edge_input))
+        h_global_exp = h_global.expand(h_edge.shape[0], 
+                                       -1)
+        edge_input = torch.cat([h_node[src], 
+                                h_node[dst], 
+                                h_edge, 
+                                h_global_exp], 
+                                dim=-1)
+        h_edge_new = self.edge_norm(h_edge + self.edge_mlp(edge_input)) #! self.edge_mlp: what is the reasoning for this, why is edge information getting updated with node,edge and global
 
         # Node update: f_v([h_node, agg_incoming_edges])
         agg = torch.zeros_like(h_node)
-        agg.scatter_add_(0, dst.unsqueeze(-1).expand(-1, h_edge_new.shape[-1]), h_edge_new)
-        node_input = torch.cat([h_node, agg], dim=-1)
+        agg.scatter_add_(0, 
+                         dst.unsqueeze(-1).expand(-1, h_edge_new.shape[-1]), 
+                         h_edge_new
+                         )
+        node_input = torch.cat([h_node, agg], 
+                               dim=-1)
         h_node_new = self.node_norm(h_node + self.node_mlp(node_input))
 
         # Global update: f_u([h_global, mean(h_node'), mean(h_edge')])
         global_input = torch.cat(
-            [h_global, h_node_new.mean(dim=0, keepdim=True), h_edge_new.mean(dim=0, keepdim=True)],
-            dim=-1,
-        )
+                                [h_global, 
+                                 h_node_new.mean(dim=0, keepdim=True), 
+                                 h_edge_new.mean(dim=0, keepdim=True)
+                                ],
+                                dim=-1,
+                                )
         h_global_new = h_global + self.global_mlp(global_input)
 
         return h_node_new, h_edge_new, h_global_new
@@ -92,7 +115,10 @@ class _MessagePassingBlock(nn.Module):
 # Conservation projection
 # ---------------------------------------------------------------------------
 
-
+#TODO: add new function for local conservation projection
+#! conservation_projection: what is the projection, i do not see any -
+#! conservation_projection: what is differentiable about this, its only a ReLU, there is not parameters associated, so why call it differentiable
+# Global conservation projection
 def conservation_projection(
     node_uavs: torch.Tensor,
     edge_uavs: torch.Tensor,
@@ -106,6 +132,7 @@ def conservation_projection(
     edge_uavs = F.relu(edge_uavs)
 
     current_sum = node_uavs.sum() + edge_uavs.sum()
+    #! current_sum: why and when can this condition occur
     if current_sum < 1e-8:
         return node_uavs, edge_uavs
 
@@ -232,14 +259,14 @@ class GraphFlowGNN(SurrogateModel):
             h_node, h_edge, h_global = mp(h_node, h_edge, h_global, edge_index)
 
         # Decode (residual)
-        delta_node = self.node_decoder(h_node)
-        delta_edge = self.edge_decoder(h_edge)
+        delta_node = self.node_decoder(h_node) 
+        delta_edge = self.edge_decoder(h_edge) #! on backward pass for updating parameters, this is where we start and move up - No learnable parameters below this line
         next_x = x + delta_node
         next_edge_attr = edge_attr + delta_edge
 
         # Conservation projection on UAV-count channels only
         # Clamp sub-channels non-negative before computing fractions
-        node_uavs = F.relu(next_x[:, self.NODE_UAV_INDICES].clone())
+        node_uavs = F.relu(next_x[:, self.NODE_UAV_INDICES].clone()) #! F.relu: why am i doing ReLU op here when in the next line I have consesrvation_projection
         edge_uavs = next_edge_attr[:, self.EDGE_UAV_INDEX].clone()
 
         proj_node, proj_edge = conservation_projection(

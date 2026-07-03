@@ -26,12 +26,23 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch
 from torch_geometric.data import Data
+#! The objective of surrogate Dynamics model, state_t -> SURROGATE_DYNAMICS_MODEL -> state_t+1,
+#! BUT main thing is we want to use this surrogate model to finally get episode metrics
+#! instead of running the simulator, we run this surrogate model, and derive metrics at the end. 
+# SO we will need some hyper parameters for this learned surrogate model
+# 1. episode length 
+# 2. end episode metrics  (MAYBE)
+# 3. collision and nmac data
 
-NODE_ATTR_KEYS: Tuple[str, ...] = ("n_grounded", "n_landing_queue", "capacity")
+
+#! there is no concept of time - 
+#  avg_progress -> implicitly encodes time, should we include some other data that has temporal aspect
+#  adding a temporal aspect will allow the model to understand evolution more clearly 
+NODE_ATTR_KEYS: Tuple[str, ...] = ("n_grounded", "n_landing_queue", "capacity") #! n_grounded: rethink variable name, since they are not grounded, rather - landed and awaiting new mission
 NODE_ATTR_DIM: int = len(NODE_ATTR_KEYS)
 
-EDGE_DYNAMIC_KEYS: Tuple[str, ...] = ("n_in_transit", "avg_progress")
-EDGE_STATIC_KEYS: Tuple[str, ...] = ("edge_distance",)
+EDGE_DYNAMIC_KEYS: Tuple[str, ...] = ("n_in_transit", "avg_progress") #! avg_progress: of individual UAV, or something else 
+EDGE_STATIC_KEYS: Tuple[str, ...] = ("edge_distance",) #! edge_distance: rethink variable name, edge_distance vs edge_length vs something else more aligned with UAM 
 EDGE_ATTR_DIM: int = len(EDGE_DYNAMIC_KEYS) + len(EDGE_STATIC_KEYS)
 
 VALID_EDGE_TYPES = {"full_mesh", "demand_driven", "distance_threshold"}
@@ -102,6 +113,7 @@ def _step_to_graph(
     x = torch.zeros((n_nodes, NODE_ATTR_DIM), dtype=torch.float32)
     for idx_str, info in vp_snap.items():
         idx = int(idx_str)
+        #! idx: since we have this conditional, shouldnt we have else as well so we do not pass error silently
         if idx < n_nodes:
             x[idx, 0] = float(info.get("n_grounded", 0))
             x[idx, 1] = float(info.get("n_landing_queue", 0))
@@ -123,6 +135,7 @@ def _step_to_graph(
         if snap is not None:
             n_transit = snap["n_in_transit"]
             edge_attr[e, 0] = float(n_transit)
+            #! snap: need to look into snap AND find def of progress_sum, at the moment feels like its a averaged value - as long as its a avg percentage - I think it will be okay
             edge_attr[e, 1] = snap["progress_sum"] / n_transit if n_transit > 0 else 0.0
         edge_attr[e, 2] = pairwise_dists.get((src_i, dst_i), 0.0)
 
@@ -132,11 +145,11 @@ def _step_to_graph(
     total_uavs = total_grounded + total_transit
 
     data = Data(
-        x=x,
-        edge_index=edge_index,
-        edge_attr=edge_attr,
+        x=x, # Node feature matrix
+        edge_index=edge_index, # edge index
+        edge_attr=edge_attr, # edge feature matrix
         total_uavs=torch.tensor([total_uavs], dtype=torch.float32),
-        step=torch.tensor([step.get("step", 0)], dtype=torch.long),
+        step=torch.tensor([step.get("step", 0)], dtype=torch.long), #! step: what is this, is it timestep
     )
     return data
 
