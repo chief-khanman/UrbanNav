@@ -198,7 +198,6 @@ class SimulatorManager(DemandModelMixin):
         self.controller_module.register_uav_controllers()
         self.dynamics_module.register_uav_dynamics()
 
-        #! why do i need this
         # state
         self._state = SimulatorState(self.timestamp,
                                      self.currentstep,
@@ -264,7 +263,6 @@ class SimulatorManager(DemandModelMixin):
         for uav_id in self.atc.uav_dict.keys():
             self.atc.has_left_start_vertiport(uav_id)
 
-            #! How can the same uav_id leave and reach at the same time
             #* logic for has_reached_end_vertiport() changed so this makes sense
             # has_reached_end_vertiport() -> check implementation
             self.atc.has_reached_end_vertiport(uav_id) #! this function shall add the uav to vertiports landing queue
@@ -400,7 +398,6 @@ class SimulatorManager(DemandModelMixin):
         '''Bring all sort of updates and execute them in this function '''
         
 
-        #! WHERE IS THE UAV_ID TO UAV MAP
         ### MOVE UAV ###
         
         # PLAN

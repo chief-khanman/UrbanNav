@@ -149,12 +149,6 @@ class UAV_template(ABC):
             start (Point): Starting position of the UAV.
             end (Point): Target position of the UAV.
         """
-        # TODO: 
-        # collect start-end information from vertiport location
-        # adjust the arguments to accept two vertiports
-        # from each vertiport collect their location, and assign that as start/end point  
-        
-        # WORKING:  --- Feb 24, 2026
         # VERTIPORT DATA
         self.start_vertiport: Vertiport = start
         self.end_vertiport: Vertiport = end
@@ -178,9 +172,12 @@ class UAV_template(ABC):
         
         # UAV kinematics state 
         self.current_speed:float = 0
-        # TODO: change current heading at start to a random direction. let controller change current heading over time
-        # performing this change will have impact on ORCA agent visualization
-        # TODO: fix arrow visualization for ORCA agents - the arrow of ORCA agents should get updated as current heading is changes  
+        # ORCA agents will update current_heading every step from the RVOSimulator's
+        # preferred/actual velocity output rather than a controller-driven yaw rate, so
+        # once dynamics_ORCA.py exists (see dynamics_engine.py's DYNAMICS_CLASS_MAP note
+        # on Python-RVO2 vs RVO2-python) the heading arrow drawn in renderer.py
+        # (currently disabled, see renderer.py's PID-gains comment) needs to read
+        # current_heading fresh each frame to stay in sync with ORCA's own velocity.
         #self.current_heading = math.atan2((end.y - start.y), (end.x - start.x))
         self.current_heading = np.random.uniform(-math.pi, math.pi)
         

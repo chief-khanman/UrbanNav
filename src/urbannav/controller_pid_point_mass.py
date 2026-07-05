@@ -28,7 +28,7 @@ class PIDPointMassController(Controller):
         yaw_error = (target_heading - uav.current_heading + np.pi) % (2 * np.pi) - np.pi
         
         # PD Law for yaw rate
-        yaw_rate_cmd = (self.Kp_yaw * yaw_error) + (self.Kd_yaw * (yaw_error - self.prev_yaw_error) / self.dt) #! need to pass dt from sim_manager 
+        yaw_rate_cmd = (self.Kp_yaw * yaw_error) + (self.Kd_yaw * (yaw_error - self.prev_yaw_error) / self.dt)
         self.prev_yaw_error = yaw_error
 
         return accel_cmd, yaw_rate_cmd

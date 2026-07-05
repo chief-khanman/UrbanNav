@@ -256,7 +256,6 @@ class ATC():
         
         outgoing_uav = self.uav_dict[outgoing_uav_id]
         outgoing_uav.has_left_start = True
-        #TODO: have not added UAV to vertiports UAV list during UAV init - thats why cannot remove from a vp_list 
         print(f'UAV id: {outgoing_uav.id_}. Vertiport uav_id_list: {outgoing_uav.start_vertiport.uav_id_list}' )
         outgoing_uav.start_vertiport.uav_id_list.remove(outgoing_uav_id)
 

@@ -17,13 +17,8 @@ import json
 
 #### ------------ CONFIG ------------ ####
 
-# Reserved type name for RL-training UAVs — controller is assigned at training time. 
+# Reserved type name for RL-training UAVs — controller is assigned at training time.
 # Need to think about test time, and connection of policy during test.
-
-# TODO:
-# USE 'mode' for agent assignment. - if mode train 
-# if mode 'train' UAV has no controller, elif mode 'test' UAV must have mapping to RL controller
-# use AerBus to extract UAV state information for mode: 'test' RL controller. 
 
 # Multi-agent RL:
 # - RESERVED_TYPE_SINGLE_AGENT_LEARNING: at most one fleet_composition entry; mode

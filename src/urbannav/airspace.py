@@ -16,12 +16,8 @@ import random
 from sklearn.cluster import KMeans as KM 
 
 from urbannav.vertiport import Vertiport
-#! FIX:
-# this module will now handle creating objects in/on airspace
-# vertiport creation
-# restricted airspace creation
-#
-class Airspace: 
+
+class Airspace:
     
     """Primary Airspace asset and methods for adding vertiports. """
     
@@ -131,21 +127,19 @@ class Airspace:
                     #apply buffer zone around restricted area polygon
                     self.location_utm_buffer[tag_value] = self.location_utm[tag_value].buffer(self.buffer_radius)
                     
-                    #! why feed the same information above into a list
                     self.airspace_restricted_area_array.append(self.location_utm[tag_value])
                     self.airspace_restricted_area_buffer_array.append(self.location_utm_buffer[tag_value])
                 except Exception as e:
                     print(f'Warning: Failed to get features for {tag}={tag_value}: {e}')
                     continue
 
-            #! who is using these two variables
             self.restricted_airspace_buffer_geo_series = pd.concat(self.airspace_restricted_area_buffer_array)
             self.restricted_airspace_geo_series = pd.concat(self.airspace_restricted_area_array)
 
         # Vertiport data
         self.max_num_vps_airspace = number_of_vertiports #! change the name of this variable
         self.vertiport_list:List[Vertiport] = []
-        self.polygon_dict:Dict[str,List[Polygon]] = {} #key,value = str, Polygon #! where and why is this needed 
+        self.polygon_dict:Dict[str,List[Polygon]] = {} #key,value = str, Polygon
 
         return None
 
@@ -280,10 +274,7 @@ class Airspace:
         return vertiport_list
 
     def _make_polygon_dict(self, tag_str) -> None:
-        # TODO: check if tag_str in tag_list
-        # if True, then use tag_str as key for dict
-
-        '''Internal method for building vertiports using vertiport_tags. 
+        '''Internal method for building vertiports using vertiport_tags.
         Add polygons of specific "tag_str" to an local dictionary.
         These polygons will be used to create vertiports using OSMNx tags'''
 
@@ -587,7 +578,7 @@ class Airspace:
         region_index_for_sampling =  len(partial_vertiport_list)
         if region_index_for_sampling: 
             for region in range(region_index_for_sampling, required_vertiports):
-                vertiport = random.sample(self.regions_dict[region], k=1)[0] #! random.sample() returns a list
+                vertiport = random.sample(self.regions_dict[region], k=1)[0]
                 partial_vertiport_list.append(vertiport)
 
         complete_list_vertiport = partial_vertiport_list
@@ -602,10 +593,7 @@ class Airspace:
         # and fill the remaining requirement for vertiport
 
     def set_vertiport_list_vp_design(self, complete_vertiport_list):
-        #! why is this +=, that would mean argument is added to previous self.vertiport,
-        #! complete_vertiport_list consists of all required vertiports for running map_env simulation
-        #! complete_vertiport_list comes from airspace.fill_vertiport_from_region()
-        self.vertiport_list = complete_vertiport_list 
+        self.vertiport_list = complete_vertiport_list
         return None 
 
     def get_vertiports_of_region(self, region):
@@ -622,7 +610,7 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt 
     time.sleep(1)
     
-    airspace = Airspace(number_of_vertiports=28, #! what is the use of this argument/attr 
+    airspace = Airspace(number_of_vertiports=28,
                         location_name="Austin, Texas, USA", 
                         airspace_restricted_area_tag_list=[], 
                         vertiport_tag_list=[('building', 'commercial')])
