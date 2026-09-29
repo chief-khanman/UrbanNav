@@ -63,9 +63,13 @@ don't change that scope without considering test runtime. `conftest.py` also exp
 `three_uav_rig` fixture that builds 3 UAVs directly with scripted positions, bypassing
 Airspace/ATC/OSM, to deterministically exercise the detect → NMAC → collision pipeline.
 
-`Python-RVO2/` is a vendored third-party C++/Cython library (ORCA collision avoidance) with its own
-CMake/setup.py build; it is not part of the `urbannav` package and is wired in only as a future
-`ORCA` dynamics/controller backend (see `VALID_DYNAMICS`/`VALID_CONTROLLERS` in `component_schema.py`).
+`src/urbannav/rvo2_python/` is a vendored pure-Python port of RVO2/ORCA
+(https://github.com/chengji253/RVO2-python) — keep it byte-identical to upstream apart from its
+package-relative imports (it is excluded from pre-commit). The UrbanNav-facing ORCA stack is
+`dynamics_orca.py` + `controller_orca.py` + `plan_orca.py`, selected with `dynamics: ORCA`,
+`controller: ORCA`, `planner: ORCA` (controller and dynamics ORCA must be paired — enforced in
+`component_schema.py`). `ORCAController` needs the whole fleet to see neighbors: AerBus calls
+`bind_fleet(uav_dict)` on any controller that defines it.
 
 ## Repo layout
 
@@ -166,7 +170,7 @@ external (gym/pettingzoo-supplied) actions with the internally-generated ones be
 
 `AerBus` supports three controller execution modes (`ExecutionMode` enum): `INLINE` (same process,
 the common case — see `CONTROLLER_CLASS_MAP`), `PROCESS` (subprocess via `multiprocessing.Queue`),
-and `EXTERNAL` (remote process over ZeroMQ REQ-REP, for non-Python controllers like MATLAB/ORCA).
+and `EXTERNAL` (remote process over ZeroMQ REQ-REP, for non-Python controllers like MATLAB).
 
 ### Per-step sequence (`SimulatorManager._step_uavS`)
 

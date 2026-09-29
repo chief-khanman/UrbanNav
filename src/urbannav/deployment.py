@@ -21,7 +21,8 @@ import os
 
 from urbannav.uam_simulator import UAMSimulator
 
-CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'sample_config.yaml')
+# sample_config.yaml lives at the repo root (two levels above src/urbannav/)
+CONFIG_FILE = os.path.join(os.path.dirname(__file__), '..', '..', 'sample_config.yaml')
 
 
 def main() -> None:

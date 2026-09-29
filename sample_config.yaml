@@ -58,6 +58,12 @@ fleet_composition:
     planner: PointMass-PID
     mode: TRAIN    # OR TEST
     policy_id: single_agent_baseline
+  - type_name: ORCA
+    count: 5
+    dynamics: ORCA        # controller ORCA and dynamics ORCA must be paired
+    controller: ORCA
+    sensor: PartialSensor
+    planner: ORCA
 
 
 #### CONFIG ####

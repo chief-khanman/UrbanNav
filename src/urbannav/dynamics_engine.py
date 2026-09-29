@@ -7,6 +7,7 @@ from urbannav.dynamics_template import Dynamics
 from urbannav.dynamics_point_mass import PointMass
 from urbannav.dynamics_six_dof import SixDOF
 from urbannav.dynamics_holonomic import HolonomicDynamics
+from urbannav.dynamics_orca import ORCADynamics
 # in the config file -
 # dynamics mode and solver will be defined for use with DynamicsEngine()
 
@@ -18,7 +19,7 @@ DYNAMICS_CLASS_MAP: Dict[str, type] = {
     'PointMass':    PointMass,
     'SixDOF':       SixDOF,
     'TwoDVector-Holonomic': HolonomicDynamics,
-    # 'ORCA': ORCA,  # TODO: add once dynamics_ORCA.py is implemented
+    'ORCA':         ORCADynamics,
 }
 
 
@@ -45,8 +46,8 @@ class DynamicsEngine:
         # 3D:
         #   1. 6DOF
         #   2. ...
-        # External:
-        #   1. PyRVO2
+        # Velocity-controlled:
+        #   1. ORCA (dynamics_orca.py, pairs with controller_orca.py)
         #   2. ...
 
 

@@ -9,14 +9,18 @@ from urbannav.controller_template import Controller
 from urbannav.controller_pid_point_mass import PIDPointMassController
 from urbannav.controller_holonomic import HolonomicPIDController
 from urbannav.controller_cascade_PID_six_dof import CascadedPIDSixDOFController
+from urbannav.controller_orca import ORCAController
 
 
 # Maps controller name strings (from VALID_CONTROLLERS / ATC.controller_map keys)
 # to their concrete Controller subclass. Add new inline controllers here.
+# Controllers that need to see other UAVs (e.g. ORCA) define bind_fleet(uav_dict),
+# which register_uav_controllers() calls with the live ATC uav_dict.
 CONTROLLER_CLASS_MAP: Dict[str, type] = {
     'PIDPointMassController':    PIDPointMassController,
     'PIDHolonomicController':    HolonomicPIDController,
     'CascadedPIDSixDOFController': CascadedPIDSixDOFController,
+    'ORCA':                      ORCAController,
 }
 
 # Controller names that signal "RL training mode" — no internal action is generated;
@@ -37,7 +41,7 @@ class AerBus:
     Supports three execution modes:
       - INLINE:   controller defined in simulator codebase, called directly each step
       - PROCESS:  controller in a spawned subprocess, communicates via multiprocessing.Queue
-      - EXTERNAL: controller in a remote process (e.g. MATLAB, C++, ORCA-RVO2),
+      - EXTERNAL: controller in a remote process (e.g. MATLAB, C++),
                   communicates via ZeroMQ REQ-REP sockets
 
     RL training mode:
@@ -156,6 +160,9 @@ class AerBus:
                 # INLINE: one stateful instance per UAV (PID keeps prev_yaw_error, etc.)
                 for uav_id in uav_id_list:
                     instance = CONTROLLER_CLASS_MAP[controller_name](self.config.simulator.dt) #added dt for controller that needs to be synced with global dt
+                    if hasattr(instance, 'bind_fleet'):
+                        # multi-agent controllers (ORCA) read neighbor states
+                        instance.bind_fleet(self.uav_dict)
                     self.register_controller(controller_name, [uav_id],
                                              ExecutionMode.INLINE, instance=instance)
 

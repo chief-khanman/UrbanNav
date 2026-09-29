@@ -44,7 +44,7 @@ RESERVED_TYPE_MODE: set[str] = {'TRAIN', 'TEST'}
 VALID_DYNAMICS: set[str] = {'PointMass', 'SixDOF', 'TwoDVector-Holonomic', 'ORCA'}
 VALID_CONTROLLERS: set[str] = {'PIDPointMassController', 'PIDHolonomicController', 'CascadedPIDSixDOFController', 'LQR', 'MARL', 'ORCA', 'Static', 'RL'}
 VALID_SENSORS: set[str] = {'PartialSensor', 'GlobalSensor', 'MapSensor'}
-VALID_PLANNERS: set[str] = {'PointMass-PID', 'Holonomic-PID', 'PointMass-RL', 'SixDOF-PID', 'SixDOF-LQR', 'N/A'}
+VALID_PLANNERS: set[str] = {'PointMass-PID', 'Holonomic-PID', 'PointMass-RL', 'SixDOF-PID', 'SixDOF-LQR', 'ORCA', 'N/A'}
 
 # UAV type registry — physical parameters live here in code, not in the yaml.
 # fleet_composition.type_name values must match a key in this dict.
@@ -259,6 +259,18 @@ class UAVFleetInstanceConfig(BaseModel):
         if self.type_name not in RESERVED_LEARNING_TYPES and self.controller is None:
             raise ValueError(
                 f"controller must be set for non-LEARNING type '{self.type_name}'"
+            )
+        return self
+
+    @model_validator(mode='after')
+    def orca_controller_dynamics_pairing_check(self) -> 'UAVFleetInstanceConfig':
+        """controller ORCA emits (vx, vy) velocity commands that only dynamics ORCA
+        consumes (every other dynamics model expects accelerations), so the two
+        must be used together."""
+        if (self.controller == 'ORCA') != (self.dynamics == 'ORCA'):
+            raise ValueError(
+                f"controller 'ORCA' and dynamics 'ORCA' must be used together, got "
+                f"controller={self.controller!r}, dynamics={self.dynamics!r}"
             )
         return self
 

@@ -8,6 +8,7 @@ from urbannav.component_schema import UAMConfig, VALID_PLANNERS
 from urbannav.plan_point_mass_pid import PointMassPIDPlanner
 from urbannav.plan_holonomic import HolonomicPlanner
 from urbannav.plan_six_dof_pid import SixDOFPIDPlanner
+from urbannav.plan_orca import ORCAPlanner
 
 
 # Maps VALID_PLANNERS string names → PlannerTemplate subclasses.
@@ -18,6 +19,7 @@ PLANNER_CLASS_MAP: Dict[str, type] = {
     'PointMass-PID': PointMassPIDPlanner,
     'Holonomic-PID': HolonomicPlanner,
     'SixDOF-PID':    SixDOFPIDPlanner,
+    'ORCA':          ORCAPlanner,
     # 'PointMass-RL': PointMassRLPlanner,   # TODO: add once implemented
 }
 
