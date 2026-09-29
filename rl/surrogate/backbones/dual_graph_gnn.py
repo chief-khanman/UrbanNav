@@ -69,6 +69,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.data import HeteroData
+from torch_geometric.utils import degree
 
 from rl.surrogate.backbones.surrogate_template import SurrogateModel
 from rl.surrogate.datasets.dual_graph_dataset import UAV_EDGE_DIM, UAV_NODE_DIM, VP_NODE_DIM
@@ -108,8 +109,15 @@ class _HomoMessagePassingBlock(nn.Module):
         edge_input = torch.cat([h_node[src], h_node[dst], h_edge], dim=-1)
         h_edge_new = self.edge_norm(h_edge + self.edge_mlp(edge_input))
 
+        # Mean (not sum) over incoming edges: in-degree varies with both fleet
+        # size (UAV-UAV graph) and vertiport count (VP-VP graph) across the
+        # sweep dataset's varied configs -- an unnormalized sum would bias
+        # aggregated message magnitude by graph size alone, hurting
+        # generalization across configs (mirrors the same fix in graph_flow_gnn.py).
         agg = torch.zeros_like(h_node)
         agg.scatter_add_(0, dst.unsqueeze(-1).expand(-1, h_edge_new.shape[-1]), h_edge_new)
+        in_degree = degree(dst, num_nodes=h_node.shape[0], dtype=h_edge_new.dtype).clamp(min=1).unsqueeze(-1)
+        agg = agg / in_degree
         node_input = torch.cat([h_node, agg], dim=-1)
         h_node_new = self.node_norm(h_node + self.node_mlp(node_input))
 
@@ -133,13 +141,17 @@ class _CrossGraphBlock(nn.Module):
         uav_to_vp_ei: torch.Tensor,
         vp_to_uav_ei: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        # UAV -> VP: aggregate UAV info at vertiport nodes
+        # UAV -> VP: aggregate UAV info at vertiport nodes (mean, not sum -- see
+        # _HomoMessagePassingBlock for why: cross-graph in-degree also varies
+        # with fleet/vertiport size across the sweep dataset's configs).
         if uav_to_vp_ei.shape[1] > 0:
             src, dst = uav_to_vp_ei[0], uav_to_vp_ei[1]
             agg_at_vp = torch.zeros_like(h_vp)
             agg_at_vp.scatter_add_(
                 0, dst.unsqueeze(-1).expand(-1, h_uav.shape[-1]), h_uav[src]
             )
+            vp_in_degree = degree(dst, num_nodes=h_vp.shape[0], dtype=h_uav.dtype).clamp(min=1).unsqueeze(-1)
+            agg_at_vp = agg_at_vp / vp_in_degree
             vp_input = torch.cat([h_vp, agg_at_vp], dim=-1)
             h_vp = self.vp_norm(h_vp + self.uav_to_vp_mlp(vp_input))
 
@@ -150,6 +162,8 @@ class _CrossGraphBlock(nn.Module):
             agg_at_uav.scatter_add_(
                 0, dst.unsqueeze(-1).expand(-1, h_vp.shape[-1]), h_vp[src]
             )
+            uav_in_degree = degree(dst, num_nodes=h_uav.shape[0], dtype=h_vp.dtype).clamp(min=1).unsqueeze(-1)
+            agg_at_uav = agg_at_uav / uav_in_degree
             uav_input = torch.cat([h_uav, agg_at_uav], dim=-1)
             h_uav = self.uav_norm(h_uav + self.vp_to_uav_mlp(uav_input))
 
@@ -180,6 +194,11 @@ class DualGraphGNN(SurrogateModel):
 
     COLLISION_STATUS_IDX = 8  # index of collision_status in UAV_NODE_KEYS
     VEL_INDICES = [3, 4, 5]  # vx, vy, vz indices in UAV_NODE_KEYS
+    IN_NMAC_EVENT_IDX = 9  # index of in_nmac_event in UAV_NODE_KEYS
+    IN_COLLISION_EVENT_IDX = 10  # index of in_collision_event in UAV_NODE_KEYS
+    IN_RA_COLLISION_EVENT_IDX = 11  # index of in_ra_collision_event in UAV_NODE_KEYS
+    MISSIONS_COMPLETED_IDX = 12  # index of missions_completed in UAV_NODE_KEYS
+    EVENT_FLAG_INDICES = [9, 10, 11]  # in_nmac/in_collision/in_ra_collision -- all [0,1] flags
 
     def __init__(
         self,
@@ -276,16 +295,36 @@ class DualGraphGNN(SurrogateModel):
         raise NotImplementedError("DualGraphGNN is a next-state model, not episode-outcome")
 
     def predict_dual_graph_next_state(self, data: HeteroData) -> Dict[str, torch.Tensor]:
-        """Full prediction pipeline with conservation projection and collision masking."""
+        """Full prediction pipeline with conservation projection, collision
+        masking, and the "dead stays dead" invariant for already-removed slots.
+        """
+        input_uav_x = data["uav"].x
         preds = self.forward(data)
         pred_uav = preds["uav_x"]
 
-        # Conservation: ensure total active UAVs is preserved
-        if hasattr(data, "total_uavs"):
-            status_pred = pred_uav[:, self.COLLISION_STATUS_IDX]
-            status_proj = uav_conservation_projection(status_pred, data.total_uavs)
+        # mask_in: which slots were still real going INTO this step. Ground
+        # truth during teacher-forced training (data["uav"].mask, set by
+        # DualGraphDataset); during autoregressive rollout there's no ground
+        # truth, so callers should thread the previous call's returned mask
+        # back in as data["uav"].mask (see rollout_metrics.py). Falls back to
+        # "everything real" for graphs that predate this fixed-size padding
+        # scheme (e.g. older hand-built test graphs).
+        if hasattr(data["uav"], "mask"):
+            mask_in = data["uav"].mask
+        else:
+            mask_in = torch.ones(pred_uav.shape[0], device=pred_uav.device)
+        real_in = mask_in > 0.5
+        dead_in = ~real_in
+
+        # Conservation: ensure total active UAVs is preserved, restricted to
+        # currently-real slots only -- an already-dead slot's predicted
+        # collision_status is meaningless noise (it gets fully overridden
+        # below anyway) and would otherwise pollute the rescale factor.
+        if hasattr(data, "total_uavs") and real_in.any():
+            status_pred_real = pred_uav[real_in, self.COLLISION_STATUS_IDX]
+            status_proj_real = uav_conservation_projection(status_pred_real, data.total_uavs)
             pred_uav = pred_uav.clone()
-            pred_uav[:, self.COLLISION_STATUS_IDX] = status_proj
+            pred_uav[real_in, self.COLLISION_STATUS_IDX] = status_proj_real
 
         # Zero out velocities for collided UAVs (status near 0 for active_high)
         status = pred_uav[:, self.COLLISION_STATUS_IDX]
@@ -295,5 +334,47 @@ class DualGraphGNN(SurrogateModel):
             for vi in self.VEL_INDICES:
                 pred_uav[:, vi] = pred_uav[:, vi].masked_fill(collision_mask.squeeze(-1), 0.0)
 
+        # Event flags (in_nmac/in_collision/in_ra_collision) are [0,1] flags,
+        # not free-floating residuals -- sigmoid (not ReLU) since they're
+        # boolean-like rather than count-valued (unlike graph_flow_gnn.py's
+        # nmac_count, which is a per-edge count).
+        pred_uav = pred_uav.clone()
+        for idx in self.EVENT_FLAG_INDICES:
+            pred_uav[:, idx] = torch.sigmoid(pred_uav[:, idx])
+
+        # missions_completed can't go negative or decrease -- a UAV never
+        # "un-completes" a mission. Clone the read *before* using it in
+        # torch.maximum: writing the result back into pred_uav[:, IDX] in
+        # place would otherwise corrupt the exact storage maximum's backward
+        # needs to inspect (it's a view into pred_uav, not a copy).
+        current_missions = pred_uav[:, self.MISSIONS_COMPLETED_IDX].clone()
+        pred_uav = pred_uav.clone()
+        pred_uav[:, self.MISSIONS_COMPLETED_IDX] = torch.maximum(
+            current_missions, input_uav_x[:, self.MISSIONS_COMPLETED_IDX]
+        )
+
+        # "Dead stays dead": once a slot is removed, it must never come back --
+        # force already-dead slots back to their exact (already-frozen) input
+        # values, overriding anything the decoder predicted for them. This is
+        # the model-side analog of GraphFlowGNN's monotonic total_uavs decrement.
+        if dead_in.any():
+            pred_uav = pred_uav.clone()
+            pred_uav[dead_in] = input_uav_x[dead_in]
+            # in_collision_event/in_ra_collision_event are one-shot, transition-step-
+            # only signals in ground truth (DualGraphDataset._freeze_removed only
+            # sets them True the single step a slot first goes dead, then 0
+            # forever after) -- force them to 0 here too, rather than letting an
+            # already-dead slot perpetuate a stale 1.0 forward indefinitely
+            # across a multi-step rollout.
+            pred_uav[dead_in, self.IN_COLLISION_EVENT_IDX] = 0.0
+            pred_uav[dead_in, self.IN_RA_COLLISION_EVENT_IDX] = 0.0
+
+        # Next step's mask: real_in AND not newly predicted to have collided
+        # this step (predicted collision_status >= 0.5) -- monotonic, since
+        # dead_in slots are already forced to status=0 above and real_in=False
+        # forces this to 0 regardless of the (overridden, meaningless) status.
+        next_mask = real_in.float() * (pred_uav[:, self.COLLISION_STATUS_IDX] >= 0.5).float()
+
         preds["uav_x"] = pred_uav
+        preds["uav_mask"] = next_mask
         return preds

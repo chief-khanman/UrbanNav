@@ -36,6 +36,7 @@ def train(
     learning_rate: float = 1e-3,
     hidden_dim: int = 32,
     conservation_weight: float = 10.0,
+    event_weight: float = 5.0,
     seed: int = 0,
     device: str = None,
     max_steps: Optional[int] = None,
@@ -55,7 +56,9 @@ def train(
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     loss_fn = nn.MSELoss()
-    history: Dict[str, List[float]] = {"train_loss": [], "val_loss": [], "conservation_violation": []}
+    history: Dict[str, List[float]] = {
+        "train_loss": [], "val_loss": [], "conservation_violation": [], "event_loss": [],
+    }
 
     train_loader = DataLoader(train_ds, batch_size=1, shuffle=True, collate_fn=lambda b: b[0])
     val_loader = DataLoader(val_ds, batch_size=1, collate_fn=lambda b: b[0]) if val_ds is not None else None
@@ -64,6 +67,7 @@ def train(
         model.train()
         train_losses: List[float] = []
         cons_violations: List[float] = []
+        event_losses: List[float] = []
 
         for (g_t, g_tp1) in itertools.islice(train_loader, max_steps):
             g_t, g_tp1 = g_t.to(dev), g_tp1.to(dev)
@@ -78,20 +82,32 @@ def train(
             target_active = g_t.total_uavs.squeeze()
             cons_loss = (pred_active - target_active).pow(2)
 
-            loss = recon_loss + conservation_weight * cons_loss
+            # Event flags (in_nmac/in_collision/in_ra_collision) are rare,
+            # near-always-zero -- separate weighted term so they aren't
+            # swamped by the dominant-scale channels in recon_loss's
+            # full-tensor MSE (mirrors graph_flow's event_loss).
+            event_loss = loss_fn(
+                preds["uav_x"][:, DualGraphGNN.EVENT_FLAG_INDICES],
+                g_tp1["uav"].x[:, DualGraphGNN.EVENT_FLAG_INDICES],
+            )
+
+            loss = recon_loss + conservation_weight * cons_loss + event_weight * event_loss
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
             train_losses.append(recon_loss.item())
             cons_violations.append(cons_loss.item())
+            event_losses.append(event_loss.item())
 
         scheduler.step()
 
         avg_train = float(sum(train_losses) / max(len(train_losses), 1))
         avg_cons = float(sum(cons_violations) / max(len(cons_violations), 1))
+        avg_event = float(sum(event_losses) / max(len(event_losses), 1))
         history["train_loss"].append(avg_train)
         history["conservation_violation"].append(avg_cons)
+        history["event_loss"].append(avg_event)
 
         val_msg = ""
         if val_loader is not None:
@@ -109,7 +125,7 @@ def train(
             val_msg = f" | val_loss={avg_val:.6f}"
 
         if verbose > 0:
-            print(f"[dual_graph] epoch {epoch:3d}/{epochs} | train_loss={avg_train:.6f} | cons_viol={avg_cons:.8f}{val_msg}")
+            print(f"[dual_graph] epoch {epoch:3d}/{epochs} | train_loss={avg_train:.6f} | cons_viol={avg_cons:.8f} | event_loss={avg_event:.8f}{val_msg}")
 
     if test_ds is not None:
         test_loader = DataLoader(test_ds, batch_size=1, collate_fn=lambda b: b[0])
@@ -136,6 +152,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--learning-rate", type=float, default=1e-3)
     p.add_argument("--hidden-dim", type=int, default=32)
     p.add_argument("--conservation-weight", type=float, default=10.0)
+    p.add_argument("--event-weight", type=float, default=5.0)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default=None)
     p.add_argument("--max-steps", type=int, default=None, help="Cap iterations per train/val/test pass -- for smoke tests, not real training.")
@@ -151,6 +168,7 @@ def main() -> None:
         learning_rate=args.learning_rate,
         hidden_dim=args.hidden_dim,
         conservation_weight=args.conservation_weight,
+        event_weight=args.event_weight,
         seed=args.seed,
         device=args.device,
         max_steps=args.max_steps,

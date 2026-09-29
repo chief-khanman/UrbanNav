@@ -24,6 +24,17 @@ Each sample is a (hetero_graph_t, hetero_graph_t+1) pair for next-state
 prediction.  Loads from the same step_history.json files produced by
 MetricsCollector — no new logging format needed.
 
+UAV node count is fixed per episode at max_uavs (that episode's own initial
+fleet size — a UAV-UAV or restricted-area collision permanently removes a UAV
+from ATC.uav_dict under the actual persist_collided_uavs=False data-collection
+config, and the fleet only ever shrinks, never grows, mid-episode). Every step
+in an episode carries the same max_uavs UAV rows, with a `mask` tensor marking
+which slots are still real (1.0) vs removed (0.0) as of that step -- a removed
+slot's row is frozen at its last real values (velocities zeroed, collision_status
+forced to 0) rather than dropped, so every (g_t, g_tp1) pair in an episode has
+identical shapes. This is what makes train_dual_graph.py's per-pair MSE loss
+well-defined even across a collision-removal transition.
+
 Supports multiple log directories for cross-config data mixing.
 """
 
@@ -43,9 +54,44 @@ from torch.utils.data import Dataset
 
 UAV_NODE_KEYS: Tuple[str, ...] = (
     "x", "y", "z", "vx", "vy", "vz", "speed", "heading", "collision_status",
+    "in_nmac_event", "in_collision_event", "in_ra_collision_event",
+    "missions_completed", "target_x", "target_y",
 )
+# in_nmac_event: 1.0 if this UAV appears in step["collisions"]["nmac_pairs"] this
+# step, else 0.0 -- computed specially in _uav_row_from_snapshot (NMAC never
+# removes a UAV, so it's safely attributable per-UAV every step it's real).
+#
+# in_collision_event/in_ra_collision_event: 1.0 for exactly the one step a UAV
+# is removed (appears in step["collisions"]["uav_collision_pairs"] or
+# ["ra_collision_ids"]), else 0.0. Unlike graph_flow (where these events can
+# only be tracked as aggregate global scalars, since a removed UAV leaves no
+# trace to attribute to a specific edge), the fixed-size padding here keeps a
+# removed UAV's *slot* alive (frozen), so its cause-of-removal can be attributed
+# exactly, per-UAV, on the single transition step -- set in _step_to_hetero's
+# freeze path (_freeze_removed), not in _uav_row_from_snapshot, since the event
+# fires on the first step the UAV is ALREADY gone from step["uavs"].
+#
+# missions_completed: the already-exact uav_snapshots[...]['num_missions_completed']
+# MetricsCollector writes -- monotonically non-decreasing, so freezing it forward
+# for a removed slot already gives that UAV's correct final mission count.
+#
+# target_x/target_y: the UAV's true mission-destination vertiport position
+# (uav_snapshots[...]['target_vertiport_idx'], resolved against that step's own
+# vertiport snapshot), replacing the old nearest/second-nearest position
+# heuristic for the "assigned_to" cross-graph edge. Defaults to the UAV's own
+# current position when no end_vertiport is assigned yet (idle/no-mission
+# convention: 0 remaining distance, matching graph_flow's grounded-UAV proxy).
+#
+# Removed-slot freezing (see _freeze_removed): position/heading/speed/target
+# frozen at the last real snapshot: vx/vy/vz/speed forced to 0, collision_status
+# forced to 0. This is the concrete fix for collision_status never actually
+# flipping under the real (persist_collided_uavs=False) data-collection config --
+# ground truth is now derived from the real ATC.remove_uavs_by_id() removal
+# event via the dataset's own mask tracking, not the (unwired) UAV attribute.
 
 UAV_NODE_DIM: int = len(UAV_NODE_KEYS)
+_TARGET_X_IDX = UAV_NODE_KEYS.index("target_x")
+_TARGET_Y_IDX = UAV_NODE_KEYS.index("target_y")
 
 UAV_EDGE_DIM: int = 4  # [relative_distance, dx, dy, dz]
 
@@ -54,8 +100,9 @@ VP_NODE_DIM: int = len(VP_NODE_KEYS)
 
 VALID_UAV_EDGE_TYPES = {"distance_threshold", "fully_connected"}
 
-#TODO: add docstring 
+
 def _build_uav_edges_fully_connected(n: int) -> torch.Tensor:
+    """All N*(N-1) directed pairs among n local indices [0, n)."""
     if n < 2:
         return torch.zeros((2, 0), dtype=torch.long)
     src, dst = [], []
@@ -87,6 +134,30 @@ def _build_uav_edges_distance(
     return torch.tensor([src, dst], dtype=torch.long)
 
 
+def _build_uav_edges_among(
+    real_slots: np.ndarray,
+    positions: np.ndarray,
+    edge_type: str,
+    threshold: float,
+) -> torch.Tensor:
+    """UAV-UAV edges restricted to real (mask==1) slots, remapped back to
+    global slot indices -- removed slots get zero edges (isolated nodes;
+    _HomoMessagePassingBlock's degree-normalization already handles 0-in-degree
+    nodes safely via its .clamp(min=1))."""
+    n_real = len(real_slots)
+    if n_real < 2:
+        return torch.zeros((2, 0), dtype=torch.long)
+    sub_positions = positions[real_slots]
+    if edge_type == "fully_connected":
+        sub_ei = _build_uav_edges_fully_connected(n_real)
+    else:
+        sub_ei = _build_uav_edges_distance(sub_positions, threshold)
+    if sub_ei.shape[1] == 0:
+        return sub_ei
+    remap = torch.as_tensor(real_slots, dtype=torch.long)
+    return remap[sub_ei]
+
+
 def _compute_uav_edge_attr(
     positions: np.ndarray, edge_index: torch.Tensor
 ) -> torch.Tensor:
@@ -105,13 +176,85 @@ def _compute_uav_edge_attr(
     return attr
 
 
+def _resolve_target_xy(
+    snap: Dict[str, Any], vp_snap: Dict[str, Any]
+) -> Tuple[float, float]:
+    """True mission-destination position, or the UAV's own current position
+    when no end_vertiport is assigned yet (idle/no-mission convention)."""
+    target_idx = snap.get("target_vertiport_idx")
+    if target_idx is not None:
+        info = vp_snap.get(str(target_idx))
+        if info is not None:
+            return float(info.get("x", 0.0)), float(info.get("y", 0.0))
+    return float(snap.get("x", 0.0)), float(snap.get("y", 0.0))
+
+
+def _uav_row_from_snapshot(
+    uid_str: str,
+    snap: Dict[str, Any],
+    vp_snap: Dict[str, Any],
+    uav_ids_in_nmac: set,
+) -> Dict[str, float]:
+    """Build one real UAV's feature row from its step snapshot."""
+    target_x, target_y = _resolve_target_xy(snap, vp_snap)
+    return {
+        "x": float(snap.get("x", 0.0)),
+        "y": float(snap.get("y", 0.0)),
+        "z": float(snap.get("z", 0.0)),
+        "vx": float(snap.get("vx", 0.0)),
+        "vy": float(snap.get("vy", 0.0)),
+        "vz": float(snap.get("vz", 0.0)),
+        "speed": float(snap.get("speed", 0.0)),
+        "heading": float(snap.get("heading", 0.0)),
+        "collision_status": float(snap.get("collision_status", 1.0)),
+        "in_nmac_event": 1.0 if uid_str in uav_ids_in_nmac else 0.0,
+        "in_collision_event": 0.0,  # only ever 1.0 on the transition step -- see _freeze_removed
+        "in_ra_collision_event": 0.0,
+        "missions_completed": float(snap.get("num_missions_completed", 0.0)),
+        "target_x": target_x,
+        "target_y": target_y,
+    }
+
+
+def _freeze_removed(
+    row: Dict[str, float],
+    in_collision: bool,
+    in_ra_collision: bool,
+) -> Dict[str, float]:
+    """Carry a removed UAV's row forward: position/heading/target frozen at
+    its last real values, velocity/speed zeroed, collision_status forced to 0
+    (the ground-truth "dead" signal -- see module docstring).
+
+    `in_collision`/`in_ra_collision` should only be True on the single step
+    this call represents the *first* frozen step for this uav_id (checked by
+    the caller via the previous collision_status) -- so the flags correctly
+    fire exactly once, on the transition step, not on every subsequent frozen
+    step.
+    """
+    frozen = dict(row)
+    frozen["vx"] = 0.0
+    frozen["vy"] = 0.0
+    frozen["vz"] = 0.0
+    frozen["speed"] = 0.0
+    frozen["collision_status"] = 0.0
+    frozen["in_nmac_event"] = 0.0
+    frozen["in_collision_event"] = 1.0 if in_collision else 0.0
+    frozen["in_ra_collision_event"] = 1.0 if in_ra_collision else 0.0
+    return frozen
+
+
 def _step_to_hetero(
     step: Dict[str, Any],
+    uav_id_to_slot: Dict[str, int],
+    max_uavs: int,
+    last_known: Dict[str, Dict[str, float]],
     uav_edge_type: str,
     uav_edge_distance: float,
     vp_edge_index: torch.Tensor,
-) -> HeteroData:
-    """Convert one step record into a HeteroData graph."""
+) -> Tuple[HeteroData, Dict[str, Dict[str, float]]]:
+    """Convert one step record into a fixed-size ([max_uavs] UAV rows)
+    HeteroData graph, plus the updated last-known-values dict to carry into
+    the next step's call (episode-scoped, threaded by the caller)."""
     data = HeteroData()
 
     # --- Vertiport nodes ---
@@ -131,54 +274,81 @@ def _step_to_hetero(
     # --- Vertiport edges (static topology, passed in) ---
     data["vertiport", "connected_to", "vertiport"].edge_index = vp_edge_index
 
-    # --- UAV nodes ---
+    # --- UAV nodes: fixed [max_uavs, UAV_NODE_DIM], one row per episode slot ---
     uav_snap = step.get("uavs") or {}
-    uav_ids = sorted(uav_snap.keys(), key=lambda k: int(k))
-    n_uav = len(uav_ids)
-    uav_x = torch.zeros((n_uav, UAV_NODE_DIM), dtype=torch.float32)
-    uav_positions = np.zeros((n_uav, 3), dtype=np.float64)
+    collisions = step.get("collisions") or {}
+    uav_ids_in_nmac = {str(uid) for pair in (collisions.get("nmac_pairs") or []) for uid in pair}
+    uav_ids_in_collision = {
+        str(uid) for pair in (collisions.get("uav_collision_pairs") or []) for uid in pair
+    }
+    uav_ids_in_ra_collision = {str(uid) for uid in (collisions.get("ra_collision_ids") or [])}
 
-    for local_idx, uid_str in enumerate(uav_ids):
-        snap = uav_snap[uid_str]
+    uav_x = torch.zeros((max_uavs, UAV_NODE_DIM), dtype=torch.float32)
+    mask = torch.zeros(max_uavs, dtype=torch.float32)
+    uav_positions = np.zeros((max_uavs, 3), dtype=np.float64)
+    new_last_known: Dict[str, Dict[str, float]] = dict(last_known)
+
+    for uid_str, slot in uav_id_to_slot.items():
+        snap = uav_snap.get(uid_str)
+        if snap is not None:
+            row = _uav_row_from_snapshot(uid_str, snap, vp_snap, uav_ids_in_nmac)
+            mask[slot] = 1.0
+        else:
+            # Removed at or before this step. Every uid in uav_id_to_slot came
+            # from the episode's first step, so it always has a real row
+            # (in new_last_known) before it can ever be removed. The
+            # in_collision_event/in_ra_collision_event flags should only fire
+            # on the single transition step -- i.e. only if the PREVIOUS
+            # stored row was still alive (collision_status >= 0.5); once
+            # already frozen, these are always 0 on every subsequent step.
+            prev_row = new_last_known.get(uid_str, {k: 0.0 for k in UAV_NODE_KEYS})
+            just_removed = prev_row.get("collision_status", 0.0) >= 0.5
+            row = _freeze_removed(
+                prev_row,
+                in_collision=just_removed and uid_str in uav_ids_in_collision,
+                in_ra_collision=just_removed and uid_str in uav_ids_in_ra_collision,
+            )
+            mask[slot] = 0.0
+        new_last_known[uid_str] = row
+
         for feat_idx, key in enumerate(UAV_NODE_KEYS):
-            uav_x[local_idx, feat_idx] = float(snap.get(key, 0.0))
-        uav_positions[local_idx] = [
-            float(snap.get("x", 0.0)),
-            float(snap.get("y", 0.0)),
-            float(snap.get("z", 0.0)),
-        ]
-    data["uav"].x = uav_x
+            uav_x[slot, feat_idx] = row[key]
+        uav_positions[slot] = [row["x"], row["y"], row["z"]]
 
-    # --- UAV-UAV edges ---
-    if uav_edge_type == "fully_connected":
-        uav_ei = _build_uav_edges_fully_connected(n_uav)
-    else:
-        uav_ei = _build_uav_edges_distance(uav_positions, uav_edge_distance)
+    data["uav"].x = uav_x
+    data["uav"].mask = mask
+
+    # --- UAV-UAV edges (only among real slots) ---
+    real_slots = mask.nonzero(as_tuple=True)[0].numpy()
+    uav_ei = _build_uav_edges_among(real_slots, uav_positions, uav_edge_type, uav_edge_distance)
     data["uav", "communicates_with", "uav"].edge_index = uav_ei
     data["uav", "communicates_with", "uav"].edge_attr = _compute_uav_edge_attr(
         uav_positions, uav_ei
     )
 
-    # --- Cross-graph edges: UAV -> vertiport ---
-    # Each UAV is connected to vertiports it is associated with (start/end).
-    # step_history doesn't directly store vertiport indices per UAV, but we
-    # can infer from the edge snapshots or fall back to nearest-vertiport.
-    # For now: connect each UAV to its nearest vertiport by position.
+    # --- Cross-graph edges: UAV -> vertiport (only real slots) ---
+    # First edge: nearest vertiport by current position (spatial context for an
+    # in-flight UAV, which has no single discrete "current vertiport").
+    # Second edge: true target vertiport (replaces the old nearest/second-nearest
+    # position heuristic) -- found by nearest-match against target_x/target_y,
+    # which is exact since those columns hold the target vertiport's own
+    # coordinates whenever a real target is resolved.
     cross_src, cross_dst = [], []
-    if n_uav > 0 and n_vp > 0:
-        vp_positions = vp_x[:, :2].numpy()
-        for ui in range(n_uav):
+    if len(real_slots) > 0 and n_vp > 0:
+        vp_positions_arr = vp_x[:, :2].numpy()
+        for ui in real_slots:
+            ui = int(ui)
             uav_pos_2d = uav_positions[ui, :2]
-            dists = np.linalg.norm(vp_positions - uav_pos_2d, axis=1)
-            nearest = int(np.argmin(dists))
+            nearest = int(np.argmin(np.linalg.norm(vp_positions_arr - uav_pos_2d, axis=1)))
             cross_src.append(ui)
             cross_dst.append(nearest)
-            # Also connect to second-nearest if available (proxy for target vp)
-            if n_vp > 1:
-                sorted_vps = np.argsort(dists)
-                second = int(sorted_vps[1])
-                cross_src.append(ui)
-                cross_dst.append(second)
+
+            target_xy = np.array(
+                [uav_x[ui, _TARGET_X_IDX].item(), uav_x[ui, _TARGET_Y_IDX].item()]
+            )
+            target_vp = int(np.argmin(np.linalg.norm(vp_positions_arr - target_xy, axis=1)))
+            cross_src.append(ui)
+            cross_dst.append(target_vp)
     if cross_src:
         cross_ei = torch.tensor([cross_src, cross_dst], dtype=torch.long)
     else:
@@ -193,10 +363,10 @@ def _step_to_hetero(
     data["vertiport", "hosts", "uav"].edge_index = rev_ei
 
     # --- Global metadata ---
-    data.total_uavs = torch.tensor([n_uav], dtype=torch.float32)
+    data.total_uavs = mask.sum().unsqueeze(0)  # live count this step, not max_uavs
     data.step = torch.tensor([step.get("step", 0)], dtype=torch.long)
 
-    return data
+    return data, new_last_known
 
 
 class DualGraphDataset(Dataset):
@@ -263,14 +433,27 @@ class DualGraphDataset(Dataset):
                 vp_positions, self.vp_edge_distance
             )
 
-        for t in range(len(steps) - 1):
-            g_t = _step_to_hetero(
-                steps[t], self.uav_edge_type, self.uav_edge_distance, vp_edge_index
+        # Per-episode UAV slot mapping, fixed for the whole episode: the fleet
+        # is fixed-then-shrinking (ATC only creates UAVs at reset, only removes
+        # during step()), so the first step's UAV set is exactly max_uavs -- the
+        # true total ever present in this episode.
+        first_uav_ids = sorted(steps[0]["uavs"].keys(), key=int)
+        uav_id_to_slot = {uid: slot for slot, uid in enumerate(first_uav_ids)}
+        max_uavs = len(uav_id_to_slot)
+        if max_uavs == 0:
+            return
+
+        last_known: Dict[str, Dict[str, float]] = {}
+        graphs: List[HeteroData] = []
+        for step in steps:
+            g, last_known = _step_to_hetero(
+                step, uav_id_to_slot, max_uavs, last_known,
+                self.uav_edge_type, self.uav_edge_distance, vp_edge_index,
             )
-            g_tp1 = _step_to_hetero(
-                steps[t + 1], self.uav_edge_type, self.uav_edge_distance, vp_edge_index
-            )
-            self._pairs.append((g_t, g_tp1))
+            graphs.append(g)
+
+        for t in range(len(graphs) - 1):
+            self._pairs.append((graphs[t], graphs[t + 1]))
 
     def __len__(self) -> int:
         return len(self._pairs)
