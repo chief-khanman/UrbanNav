@@ -48,11 +48,28 @@ class MetricsCollector:
             collisions: Optional 5-tuple returned by SimulatorManager._step_uavS():
                         (ra_detect, uav_detect, nmac_dict,
                          ra_collision_dict, uav_collision_dict).
+
+        Note on NMAC vs. collision attribution: nmac_dict, ra_collision_dict,
+        and uav_collision_dict are produced by the get_nmac() /
+        get_collision_restricted_area() / get_collision_uavS() sensor queries
+        made inside SimulatorManager._step_uavS(), which runs earlier in the
+        same step() call, before this method ever sees `state`. By the time
+        record() runs, any UAV in a uav_collision_pair or ra_collision has
+        already been removed from `uav_dict` (by ATC.remove_uavs_by_id()), so
+        its start/end vertiport is no longer resolvable. UAVs in an NMAC pair
+        are never removed, so they are still present in `uav_dict` and get
+        attributed to a specific edge. Collision and RA-collision counts are
+        recorded as step-level totals; NMAC counts are recorded per-edge.
         """
         uav_dict: Dict = state.atc_state or {}
+        vertiport_list = state.airspace_state or []
+        # Built here (not just where the edge-snapshot loop needs it below) so the
+        # UAV loop can also resolve each UAV's true mission-destination vertiport.
+        vp_id_to_idx: Dict[int, int] = {id(vp): idx for idx, vp in enumerate(vertiport_list)}
 
         # --- UAV snapshots ---
         uav_snapshots: Dict[int, Dict[str, Any]] = {}
+        new_mission_completions_this_step = 0
         for uav_id, uav in uav_dict.items():
             pos = uav.current_position
             
@@ -85,7 +102,16 @@ class MetricsCollector:
                 uav.num_missions_completed_in_episode = (
                     getattr(uav, 'num_missions_completed_in_episode', 0) + 1
                 )
+                new_mission_completions_this_step += 1
             self._prev_mission_status[uav_id] = curr_mission_complete
+
+            # True mission-destination vertiport index, resolved the same way the
+            # edge-snapshot loop below resolves start/end vertiport -> index. None
+            # when the UAV has no end_vertiport assigned yet (idle, no mission).
+            end_vertiport = getattr(uav, 'end_vertiport', None)
+            target_vertiport_idx = (
+                vp_id_to_idx.get(id(end_vertiport)) if end_vertiport is not None else None
+            )
 
             uav_snapshots[uav_id] = {
                 'x':               pos.x,
@@ -102,6 +128,7 @@ class MetricsCollector:
                 'mission_complete': curr_mission_complete,
                 'num_missions_completed': getattr(uav, 'num_missions_completed_in_episode', 0),
                 'dist_to_goal':    dist_to_goal,
+                'target_vertiport_idx': target_vertiport_idx,
             }
 
         # --- Collision/NMAC summary ---
@@ -136,21 +163,39 @@ class MetricsCollector:
                 if ra_ids:
                     collision_summary['ra_collision_ids'].append(uid)
 
+        # Unique UAV ids removed this step by ATC.remove_uavs_by_id() (every
+        # id in every uav_collision_pair, plus every ra_collision id -- NMAC
+        # never removes). Deduped via a set in case a UAV somehow appears in
+        # both categories in the same step.
+        removed_ids: set = set()
+        for pair in collision_summary['uav_collision_pairs']:
+            removed_ids.update(pair)
+        removed_ids.update(collision_summary['ra_collision_ids'])
+        num_removed_this_step = len(removed_ids)
+        total_collision_events_this_step = len(collision_summary['uav_collision_pairs'])
+        total_ra_collision_events_this_step = len(collision_summary['ra_collision_ids'])
+
         # --- Vertiport snapshots (graph-level surrogate data) ---
         vertiport_snapshots: Dict[int, Dict[str, Any]] = {}
-        vertiport_list = state.airspace_state or []
         for vp_idx, vp in enumerate(vertiport_list):
+            grounded_ids = list(vp.uav_id_list) + list(vp.landing_queue)
+            speeds = [
+                uav_snapshots[uid]['speed'] for uid in grounded_ids if uid in uav_snapshots
+            ]
             vertiport_snapshots[vp_idx] = {
                 'x': vp.location.x,
                 'y': vp.location.y,
                 'n_grounded': len(vp.uav_id_list),
                 'n_landing_queue': len(vp.landing_queue),
                 'capacity': vp.landing_takeoff_capacity,
+                #! what am i using the speed for - what does vertiport node have to do with speed 
+                'speed_sum': float(sum(speeds)),
+                'speed_min': float(min(speeds)) if speeds else 0.0,
+                'speed_max': float(max(speeds)) if speeds else 0.0,
             }
 
         # --- Edge snapshots: count in-flight UAVs per OD vertiport pair ---
         edge_snapshots: Dict[str, Dict[str, Any]] = {}
-        vp_id_to_idx: Dict[int, int] = {id(vp): idx for idx, vp in enumerate(vertiport_list)}
         for uav_id, uav in uav_dict.items():
             if not getattr(uav, 'uav_in_flight', False):
                 continue
@@ -171,13 +216,53 @@ class MetricsCollector:
                     'n_in_transit': 0,
                     'progress_sum': 0.0,
                     'edge_distance': total_dist,
+                    'speed_sum': 0.0,
+                    'speed_min': 0.0,
+                    'speed_max': 0.0,
+                    'nmac_count': 0,
                 }
             entry = edge_snapshots[edge_key]
+            #! speed: what is the reasoning for using speed 
+            #  speed: i think its to corelate speed to NMAC and collision - if there is collision then suddenly the speed wont change after collision step 
+            #  suggested alternative - 
+            speed = getattr(uav, 'current_speed', 0.0)
+            if entry['n_in_transit'] == 0:
+                entry['speed_min'] = speed
+                entry['speed_max'] = speed
+            else:
+                entry['speed_min'] = min(entry['speed_min'], speed)
+                entry['speed_max'] = max(entry['speed_max'], speed)
+            entry['speed_sum'] += speed
             entry['n_in_transit'] += 1
             total_dist = entry['edge_distance']
             if total_dist > 0:
                 covered = uav.current_position.distance(src_vp.location)
                 entry['progress_sum'] += min(covered / total_dist, 1.0)
+
+        # Localize NMAC events onto whichever edge each involved UAV was
+        # in-flight on this step (safe: NMAC never removes, so both UAVs in
+        # every nmac_pair are still present in uav_dict here). A pair
+        # spanning two different edges increments both -- acceptable for
+        # this per-edge signal, which is model input context, not the
+        # episode-level NMAC count (that's summed across edges downstream,
+        # and NMAC is the one event type where that sum can't double-count,
+        # since each UAV can only be in-flight on one edge at a time).
+        for pair in collision_summary['nmac_pairs']:
+            for uid in pair:
+                nmac_uav = uav_dict.get(uid)
+                if nmac_uav is None or not getattr(nmac_uav, 'uav_in_flight', False):
+                    continue
+                src_vp = getattr(nmac_uav, 'start_vertiport', None)
+                dst_vp = getattr(nmac_uav, 'end_vertiport', None)
+                if src_vp is None or dst_vp is None:
+                    continue
+                src_idx = vp_id_to_idx.get(id(src_vp))
+                dst_idx = vp_id_to_idx.get(id(dst_vp))
+                if src_idx is None or dst_idx is None:
+                    continue
+                entry = edge_snapshots.get(f"{src_idx}->{dst_idx}")
+                if entry is not None:
+                    entry['nmac_count'] += 1
 
         step_record: Dict[str, Any] = {
             'step':            state.currentstep,
@@ -187,6 +272,10 @@ class MetricsCollector:
             'collisions':      collision_summary,
             'vertiports':      vertiport_snapshots,
             'edges':           edge_snapshots,
+            'num_removed_this_step': num_removed_this_step,
+            'new_mission_completions_this_step': new_mission_completions_this_step,
+            'total_collision_events_this_step': total_collision_events_this_step,
+            'total_ra_collision_events_this_step': total_ra_collision_events_this_step,
         }
         self._steps.append(step_record)
 
