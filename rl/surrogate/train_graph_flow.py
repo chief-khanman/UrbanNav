@@ -25,11 +25,35 @@ from typing import Dict, List, Optional
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+from torch_geometric.data import Data
 
 from rl.surrogate.backbones.graph_flow_gnn import GraphFlowGNN
 from rl.surrogate.train_common import auto_device, check_metadata_task, load_flat_split
 
 TASK = "graph_flow"
+
+
+def _event_loss(pred: Data, target: Data, loss_fn: nn.Module) -> torch.Tensor:
+    """Rare-event loss term: MSE restricted to the trailing non-negative
+    columns (speed stats + nmac_count) and the four global scalar heads
+    (predicted_removed/new_arrivals/collision_events/ra_collision_events).
+    These are near-always-zero/small relative to n_in_transit/avg_progress/
+    edge_distance, so a plain full-tensor MSE (recon_loss) would let the
+    dominant-scale channels swamp their gradient signal -- this term is added
+    on top (not a replacement), mirroring how conservation_loss is already a
+    separate weighted term below.
+    """
+    return (
+          loss_fn(pred.x[:, GraphFlowGNN.NODE_NONNEG_INDICES], target.x[:, GraphFlowGNN.NODE_NONNEG_INDICES])
+        + loss_fn(
+            pred.edge_attr[:, GraphFlowGNN.EDGE_NONNEG_INDICES],
+            target.edge_attr[:, GraphFlowGNN.EDGE_NONNEG_INDICES],
+                 )
+        + loss_fn(pred.num_removed, target.num_removed)
+        + loss_fn(pred.new_mission_completions, target.new_mission_completions)
+        + loss_fn(pred.total_collision_events, target.total_collision_events)
+        + loss_fn(pred.total_ra_collision_events, target.total_ra_collision_events)
+    )
 
 
 def train(
@@ -38,6 +62,7 @@ def train(
     learning_rate: float = 1e-3,
     hidden_dim: int = 32,
     conservation_weight: float = 10.0,
+    event_weight: float = 5.0,
     seed: int = 0,
     device: str = None,
     max_steps: Optional[int] = None,
@@ -57,7 +82,9 @@ def train(
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     loss_fn = nn.MSELoss()
-    history: Dict[str, List[float]] = {"train_loss": [], "val_loss": [], "conservation_violation": []}
+    history: Dict[str, List[float]] = {
+        "train_loss": [], "val_loss": [], "conservation_violation": [], "event_loss": [],
+    }
 
     train_loader = DataLoader(train_ds, batch_size=1, shuffle=True, collate_fn=lambda b: b[0])
     val_loader = DataLoader(val_ds, batch_size=1, collate_fn=lambda b: b[0]) if val_ds is not None else None
@@ -66,6 +93,7 @@ def train(
         model.train()
         train_losses: List[float] = []
         cons_violations: List[float] = []
+        event_losses: List[float] = []
 
         for (g_t, g_tp1) in itertools.islice(train_loader, max_steps):
             g_t, g_tp1 = g_t.to(dev), g_tp1.to(dev)
@@ -80,20 +108,25 @@ def train(
             target_total = g_t.total_uavs.squeeze()
             cons_loss = (pred_total - target_total).pow(2)
 
-            loss = recon_loss + conservation_weight * cons_loss
+            event_loss = _event_loss(pred, g_tp1, loss_fn)
+
+            loss = recon_loss + conservation_weight * cons_loss + event_weight * event_loss
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
             train_losses.append(recon_loss.item())
             cons_violations.append(cons_loss.item())
+            event_losses.append(event_loss.item())
 
         scheduler.step()
 
         avg_train = float(sum(train_losses) / max(len(train_losses), 1))
         avg_cons = float(sum(cons_violations) / max(len(cons_violations), 1))
+        avg_event = float(sum(event_losses) / max(len(event_losses), 1))
         history["train_loss"].append(avg_train)
         history["conservation_violation"].append(avg_cons)
+        history["event_loss"].append(avg_event)
 
         val_msg = ""
         if val_loader is not None:
@@ -109,7 +142,7 @@ def train(
             val_msg = f" | val_loss={avg_val:.6f}"
 
         if verbose > 0:
-            print(f"[graph_flow] epoch {epoch:3d}/{epochs} | train_loss={avg_train:.6f} | cons_viol={avg_cons:.8f}{val_msg}")
+            print(f"[graph_flow] epoch {epoch:3d}/{epochs} | train_loss={avg_train:.6f} | cons_viol={avg_cons:.8f} | event_loss={avg_event:.8f}{val_msg}")
 
     if test_ds is not None:
         test_loader = DataLoader(test_ds, batch_size=1, collate_fn=lambda b: b[0])
@@ -134,6 +167,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--learning-rate", type=float, default=1e-3)
     p.add_argument("--hidden-dim", type=int, default=32)
     p.add_argument("--conservation-weight", type=float, default=10.0)
+    p.add_argument("--event-weight", type=float, default=5.0)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default=None)
     p.add_argument("--max-steps", type=int, default=None, help="Cap iterations per train/val/test pass -- for smoke tests, not real training.")
@@ -149,6 +183,7 @@ def main() -> None:
         learning_rate=args.learning_rate,
         hidden_dim=args.hidden_dim,
         conservation_weight=args.conservation_weight,
+        event_weight=args.event_weight,
         seed=args.seed,
         device=args.device,
         max_steps=args.max_steps,

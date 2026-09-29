@@ -31,18 +31,23 @@ import torch.nn as nn
 
 from rl.surrogate.backbones.graph_flow_gnn import GraphFlowRecurrentGNN
 from rl.surrogate.train_common import auto_device, check_metadata_task, load_episode_splits
+from rl.surrogate.train_graph_flow import _event_loss
 
 TASK = "graph_flow"  # metadata.json records the dataset identity, not the model variant
 
 
-def _run_episodes(model, episodes, dev, loss_fn, conservation_weight=None, optimizer=None, max_steps=None):
+def _run_episodes(
+    model, episodes, dev, loss_fn, conservation_weight=None, event_weight=None,
+    optimizer=None, max_steps=None,
+):
     """Iterate each episode's pairs in order, resetting hidden state at each
     episode boundary. If optimizer is given, trains (backprop per pair);
-    otherwise evaluates under torch.no_grad(). Returns (recon_losses, cons_losses).
-    max_steps caps the total number of pairs processed across all episodes --
-    for smoke tests, not real training."""
+    otherwise evaluates under torch.no_grad(). Returns (recon_losses, cons_losses,
+    event_losses). max_steps caps the total number of pairs processed across all
+    episodes -- for smoke tests, not real training."""
     recon_losses: List[float] = []
     cons_losses: List[float] = []
+    event_losses: List[float] = []
     training = optimizer is not None
     steps_done = 0
 
@@ -70,16 +75,18 @@ def _run_episodes(model, episodes, dev, loss_fn, conservation_weight=None, optim
                 pred_total = pred.x[:, 0].sum() + pred.x[:, 1].sum() + pred.edge_attr[:, 0].sum()
                 target_total = g_t.total_uavs.squeeze()
                 cons_loss = (pred_total - target_total).pow(2)
+                event_loss = _event_loss(pred, g_tp1, loss_fn)
 
-                loss = recon_loss + conservation_weight * cons_loss
+                loss = recon_loss + conservation_weight * cons_loss + event_weight * event_loss
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
                 cons_losses.append(cons_loss.item())
+                event_losses.append(event_loss.item())
 
             recon_losses.append(recon_loss.item())
 
-    return recon_losses, cons_losses
+    return recon_losses, cons_losses, event_losses
 
 
 def train(
@@ -88,6 +95,7 @@ def train(
     learning_rate: float = 1e-3,
     hidden_dim: int = 32,
     conservation_weight: float = 10.0,
+    event_weight: float = 5.0,
     seed: int = 0,
     device: str = None,
     max_steps: Optional[int] = None,
@@ -108,34 +116,40 @@ def train(
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     loss_fn = nn.MSELoss()
-    history: Dict[str, List[float]] = {"train_loss": [], "val_loss": [], "conservation_violation": []}
+    history: Dict[str, List[float]] = {
+        "train_loss": [], "val_loss": [], "conservation_violation": [], "event_loss": [],
+    }
 
     for epoch in range(1, epochs + 1):
         model.train()
         shuffled = list(train_episodes)
         rng.shuffle(shuffled)
-        recon_losses, cons_losses = _run_episodes(model, shuffled, dev, loss_fn, conservation_weight, optimizer, max_steps)
+        recon_losses, cons_losses, event_losses = _run_episodes(
+            model, shuffled, dev, loss_fn, conservation_weight, event_weight, optimizer, max_steps
+        )
 
         avg_train = float(sum(recon_losses) / max(len(recon_losses), 1))
         avg_cons = float(sum(cons_losses) / max(len(cons_losses), 1))
+        avg_event = float(sum(event_losses) / max(len(event_losses), 1))
         history["train_loss"].append(avg_train)
         history["conservation_violation"].append(avg_cons)
+        history["event_loss"].append(avg_event)
 
         val_msg = ""
         if val_episodes is not None:
             model.eval()
-            val_recon, _ = _run_episodes(model, val_episodes, dev, loss_fn, max_steps=max_steps)
+            val_recon, _, _ = _run_episodes(model, val_episodes, dev, loss_fn, max_steps=max_steps)
             avg_val = float(sum(val_recon) / max(len(val_recon), 1))
             history["val_loss"].append(avg_val)
             val_msg = f" | val_loss={avg_val:.6f}"
 
         scheduler.step()
         if verbose > 0:
-            print(f"[graph_flow_recurrent] epoch {epoch:3d}/{epochs} | train_loss={avg_train:.6f} | cons_viol={avg_cons:.8f}{val_msg}")
+            print(f"[graph_flow_recurrent] epoch {epoch:3d}/{epochs} | train_loss={avg_train:.6f} | cons_viol={avg_cons:.8f} | event_loss={avg_event:.8f}{val_msg}")
 
     if test_episodes is not None:
         model.eval()
-        test_recon, _ = _run_episodes(model, test_episodes, dev, loss_fn, max_steps=max_steps)
+        test_recon, _, _ = _run_episodes(model, test_episodes, dev, loss_fn, max_steps=max_steps)
         history["test_loss"] = float(sum(test_recon) / max(len(test_recon), 1))
         if verbose > 0:
             print(f"[graph_flow_recurrent] test_loss={history['test_loss']:.6f}")
@@ -150,6 +164,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--learning-rate", type=float, default=1e-3)
     p.add_argument("--hidden-dim", type=int, default=32)
     p.add_argument("--conservation-weight", type=float, default=10.0)
+    p.add_argument("--event-weight", type=float, default=5.0)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default=None)
     p.add_argument("--max-steps", type=int, default=None, help="Cap total pairs processed per train/val/test pass -- for smoke tests, not real training.")
@@ -165,6 +180,7 @@ def main() -> None:
         learning_rate=args.learning_rate,
         hidden_dim=args.hidden_dim,
         conservation_weight=args.conservation_weight,
+        event_weight=args.event_weight,
         seed=args.seed,
         device=args.device,
         max_steps=args.max_steps,

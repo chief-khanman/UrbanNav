@@ -108,7 +108,12 @@ class TestGraphFlowGNN:
         with torch.no_grad():
             pred = model.predict_graph_next_state(g)
         pred_total = pred.x[:, 0].sum() + pred.x[:, 1].sum() + pred.edge_attr[:, 0].sum()
-        assert abs(pred_total.item() - g.total_uavs.item()) < 1e-5
+        # Conservation now targets pred.total_uavs (post removed_count_decoder
+        # decrement), not g.total_uavs -- the channel sum and the total_uavs
+        # field on the SAME returned graph must always agree, since the fleet
+        # legitimately shrinks step over step as collisions are predicted.
+        assert abs(pred_total.item() - pred.total_uavs.item()) < 1e-5
+        assert pred.total_uavs.item() <= g.total_uavs.item() + 1e-5
 
     def test_no_negative_uav_counts(self):
         g = _make_synthetic_graph()
@@ -130,7 +135,11 @@ class TestGraphFlowGNN:
             for _ in range(20):
                 current = model.predict_graph_next_state(current)
         final_total = current.x[:, 0].sum() + current.x[:, 1].sum() + current.edge_attr[:, 0].sum()
-        assert abs(final_total.item() - original_total) < 1e-4
+        # Channel sum must always match this same graph's own total_uavs field
+        # (self-consistency), and total_uavs must never exceed the original
+        # fleet size -- it only shrinks (or stays flat), it never grows.
+        assert abs(final_total.item() - current.total_uavs.item()) < 1e-4
+        assert current.total_uavs.item() <= original_total + 1e-4
 
     def test_raises_on_per_uav_interface(self):
         model = GraphFlowGNN(hidden_dim=16, num_mp_rounds=2)
@@ -178,7 +187,8 @@ class TestGraphFlowRecurrentGNN:
             for _ in range(10):
                 current = model.predict_graph_next_state(current)
         final_total = current.x[:, 0].sum() + current.x[:, 1].sum() + current.edge_attr[:, 0].sum()
-        assert abs(final_total.item() - original_total) < 1e-4
+        assert abs(final_total.item() - current.total_uavs.item()) < 1e-4
+        assert current.total_uavs.item() <= original_total + 1e-4
 
 
 # ---------------------------------------------------------------------------

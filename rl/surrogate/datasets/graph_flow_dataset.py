@@ -4,8 +4,11 @@ graph_flow_dataset.py
 PyTorch Geometric Dataset for graph-level surrogate Model 1.
 
 Nodes = vertiports, edges = flight paths between vertiport pairs.
-Node attributes: [n_grounded, n_landing_queue, capacity].
-Edge attributes: [n_in_transit, avg_progress, edge_distance].
+Node attributes: [n_grounded, n_landing_queue, capacity, avg_speed, speed_min, speed_max].
+Edge attributes: [n_in_transit, avg_progress, edge_distance, avg_speed, speed_min,
+speed_max, nmac_count].
+Global per-step scalars (not edge/node-localized): total_uavs, step, num_removed,
+new_mission_completions, total_collision_events, total_ra_collision_events.
 
 Each sample is a (graph_t, graph_t+1) pair for next-state prediction.
 Supports three edge topology types via ``edge_type`` parameter:
@@ -19,6 +22,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import warnings
 from itertools import product
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -26,24 +30,46 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch
 from torch_geometric.data import Data
-#! The objective of surrogate Dynamics model, state_t -> SURROGATE_DYNAMICS_MODEL -> state_t+1,
-#! BUT main thing is we want to use this surrogate model to finally get episode metrics
-#! instead of running the simulator, we run this surrogate model, and derive metrics at the end. 
-# SO we will need some hyper parameters for this learned surrogate model
-# 1. episode length 
-# 2. end episode metrics  (MAYBE)
-# 3. collision and nmac data
 
+# The end goal of this surrogate dynamics model is: state_t -> model -> state_t+1,
+# rolled out autoregressively for a full episode, so episode-level metrics
+# (collision/NMAC counts, mission completions, speed stats) can be derived from the
+# rollout instead of running the simulator. Episode length and end-episode metrics
+# already exist in the simulator core (metadata.json's total_timestep,
+# episode_metrics.json from MetricsCollector) and don't need new plumbing here.
+# Collision/NMAC data is wired in below (EDGE_EVENT_KEYS) plus global per-step
+# scalars read directly off the Data object (see _step_to_graph) -- see
+# rl/surrogate/rollout_metrics.py for how a rollout is turned into episode metrics.
+#
+# Temporal signal: avg_progress is a straight-line distance-progress fraction, not
+# elapsed transit time -- it only implicitly encodes time under a constant-speed,
+# straight-path assumption. An explicit `avg_transit_steps` edge feature (elapsed
+# steps since departure, averaged over in-transit UAVs) would need new persistent
+# per-UAV departure-step tracking in MetricsCollector and is deferred to a follow-up
+# pass, not implemented here.
+NODE_ATTR_KEYS: Tuple[str, ...] = ("n_grounded", "n_landing_queue", "capacity")
+# n_grounded is really "landed and awaiting a new mission assignment", not grounded
+# in an operational/maintenance sense -- renaming deferred to a follow-up pass
+# (touches metrics_collector.py, dual_graph_dataset.py, and one test assertion).
+NODE_SPEED_KEYS: Tuple[str, ...] = ("avg_speed", "speed_min", "speed_max")
+NODE_ATTR_DIM: int = len(NODE_ATTR_KEYS) + len(NODE_SPEED_KEYS)
 
-#! there is no concept of time - 
-#  avg_progress -> implicitly encodes time, should we include some other data that has temporal aspect
-#  adding a temporal aspect will allow the model to understand evolution more clearly 
-NODE_ATTR_KEYS: Tuple[str, ...] = ("n_grounded", "n_landing_queue", "capacity") #! n_grounded: rethink variable name, since they are not grounded, rather - landed and awaiting new mission
-NODE_ATTR_DIM: int = len(NODE_ATTR_KEYS)
-
-EDGE_DYNAMIC_KEYS: Tuple[str, ...] = ("n_in_transit", "avg_progress") #! avg_progress: of individual UAV, or something else 
-EDGE_STATIC_KEYS: Tuple[str, ...] = ("edge_distance",) #! edge_distance: rethink variable name, edge_distance vs edge_length vs something else more aligned with UAM 
-EDGE_ATTR_DIM: int = len(EDGE_DYNAMIC_KEYS) + len(EDGE_STATIC_KEYS)
+# avg_progress is the mean, over all UAVs currently in transit on this edge, of each
+# UAV's individual straight-line progress fraction min(dist(pos, src_vp)/edge_distance, 1.0).
+EDGE_DYNAMIC_KEYS: Tuple[str, ...] = ("n_in_transit", "avg_progress")
+EDGE_STATIC_KEYS: Tuple[str, ...] = ("edge_distance",)
+# edge_distance is straight-line vertiport separation, not a UAM route length --
+# renaming deferred to a follow-up pass (same blast radius as n_grounded above).
+EDGE_SPEED_KEYS: Tuple[str, ...] = ("avg_speed", "speed_min", "speed_max")
+# NMAC never removes a UAV (unlike a UAV-UAV or restricted-area collision), so it's
+# the one collision-type event that's safely attributable to a specific edge --
+# see MetricsCollector.record()'s docstring for why collision/RA-collision counts
+# are step-level global scalars instead (read off step["num_removed_this_step"]
+# etc. in _step_to_graph below), not edge-local columns.
+EDGE_EVENT_KEYS: Tuple[str, ...] = ("nmac_count",)
+EDGE_ATTR_DIM: int = (
+    len(EDGE_DYNAMIC_KEYS) + len(EDGE_STATIC_KEYS) + len(EDGE_SPEED_KEYS) + len(EDGE_EVENT_KEYS)
+)
 
 VALID_EDGE_TYPES = {"full_mesh", "demand_driven", "distance_threshold"}
 
@@ -61,11 +87,20 @@ def _build_edge_index_demand_driven(
     n_nodes: int,
     all_edge_snapshots: List[Dict[str, Dict[str, Any]]],
 ) -> torch.Tensor:
-    """Edges for every OD pair that appears at least once across all steps."""
+    """Edges for every OD pair that appears at least once across all steps.
+
+    Symmetrized: if a corridor was only ever observed carrying traffic i->j in
+    the source logs, j->i is added too, so every OD pair has both directions
+    (matching full_mesh/distance_threshold, where both directions are always
+    present) -- otherwise a node could have no way to receive information
+    about return traffic on a corridor that happened to be one-directional in
+    this particular dataset.
+    """
     pairs: set = set()
     for snap in all_edge_snapshots:
         for entry in snap.values():
             pairs.add((entry["src"], entry["dst"]))
+    pairs |= {(dst, src) for src, dst in pairs}
     if not pairs:
         return torch.zeros((2, 0), dtype=torch.long)
     src, dst = zip(*sorted(pairs))
@@ -109,15 +144,26 @@ def _step_to_graph(
     vp_snap = step.get("vertiports") or {}
     edge_snap = step.get("edges") or {}
 
-    # Node features: [n_grounded, n_landing_queue, capacity]
+    # Node features: [n_grounded, n_landing_queue, capacity, avg_speed, speed_min, speed_max]
     x = torch.zeros((n_nodes, NODE_ATTR_DIM), dtype=torch.float32)
     for idx_str, info in vp_snap.items():
         idx = int(idx_str)
-        #! idx: since we have this conditional, shouldnt we have else as well so we do not pass error silently
         if idx < n_nodes:
-            x[idx, 0] = float(info.get("n_grounded", 0))
-            x[idx, 1] = float(info.get("n_landing_queue", 0))
+            n_grounded = float(info.get("n_grounded", 0))
+            n_landing_queue = float(info.get("n_landing_queue", 0))
+            n_present = n_grounded + n_landing_queue
+            x[idx, 0] = n_grounded
+            x[idx, 1] = n_landing_queue
             x[idx, 2] = float(info.get("capacity", 0))
+            x[idx, 3] = info.get("speed_sum", 0.0) / n_present if n_present > 0 else 0.0
+            x[idx, 4] = float(info.get("speed_min", 0.0))
+            x[idx, 5] = float(info.get("speed_max", 0.0))
+        else:
+            warnings.warn(
+                f"vertiport idx {idx} >= n_nodes {n_nodes} (topology fixed from step 0) "
+                "-- dropping this vertiport's data for this step instead of silently "
+                "ignoring it; check for a topology-size mismatch across steps."
+            )
 
     # Build a lookup for edge snapshots: (src, dst) -> snapshot
     edge_lookup: Dict[Tuple[int, int], Dict[str, Any]] = {}
@@ -125,7 +171,8 @@ def _step_to_graph(
         key = (entry["src"], entry["dst"])
         edge_lookup[key] = entry
 
-    # Edge features: [n_in_transit, avg_progress, edge_distance]
+    # Edge features: [n_in_transit, avg_progress, edge_distance, avg_speed, speed_min,
+    # speed_max, nmac_count]
     n_edges = edge_index.shape[1]
     edge_attr = torch.zeros((n_edges, EDGE_ATTR_DIM), dtype=torch.float32)
     for e in range(n_edges):
@@ -135,9 +182,13 @@ def _step_to_graph(
         if snap is not None:
             n_transit = snap["n_in_transit"]
             edge_attr[e, 0] = float(n_transit)
-            #! snap: need to look into snap AND find def of progress_sum, at the moment feels like its a averaged value - as long as its a avg percentage - I think it will be okay
             edge_attr[e, 1] = snap["progress_sum"] / n_transit if n_transit > 0 else 0.0
         edge_attr[e, 2] = pairwise_dists.get((src_i, dst_i), 0.0)
+        if snap is not None:
+            edge_attr[e, 3] = snap.get("speed_sum", 0.0) / n_transit if n_transit > 0 else 0.0
+            edge_attr[e, 4] = float(snap.get("speed_min", 0.0))
+            edge_attr[e, 5] = float(snap.get("speed_max", 0.0))
+            edge_attr[e, 6] = float(snap.get("nmac_count", 0))
 
     # Global: total UAVs (sum of grounded + landing_queue + all in-transit)
     total_grounded = x[:, 0].sum().item() + x[:, 1].sum().item()
@@ -149,7 +200,22 @@ def _step_to_graph(
         edge_index=edge_index, # edge index
         edge_attr=edge_attr, # edge feature matrix
         total_uavs=torch.tensor([total_uavs], dtype=torch.float32),
-        step=torch.tensor([step.get("step", 0)], dtype=torch.long), #! step: what is this, is it timestep
+        # step["step"] = SimulatorState.currentstep, incremented once per
+        # SimulatorManager.step() call -- a 1:1 simulator timestep index.
+        step=torch.tensor([step.get("step", 0)], dtype=torch.long),
+        # Global per-step event scalars (not edge/node-localized -- see
+        # MetricsCollector.record()'s docstring for why collision/RA-collision
+        # counts can't be attributed to a specific edge like nmac_count can).
+        num_removed=torch.tensor([step.get("num_removed_this_step", 0)], dtype=torch.float32),
+        new_mission_completions=torch.tensor(
+            [step.get("new_mission_completions_this_step", 0)], dtype=torch.float32
+        ),
+        total_collision_events=torch.tensor(
+            [step.get("total_collision_events_this_step", 0)], dtype=torch.float32
+        ),
+        total_ra_collision_events=torch.tensor(
+            [step.get("total_ra_collision_events_this_step", 0)], dtype=torch.float32
+        ),
     )
     return data
 
