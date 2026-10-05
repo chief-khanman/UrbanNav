@@ -9,7 +9,7 @@ TrialScripts
 !/.pre-commit-config.yaml
 logs
 renders
-*.csv
+#*.csv
 *.png
 /Austin_GEOID_data
 /band1_*
