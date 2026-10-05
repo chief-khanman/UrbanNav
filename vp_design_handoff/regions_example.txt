@@ -1,0 +1,7 @@
+# Region file example (PRE_PLAN S09).
+# One line per region:  region <r> == [<zone_id>, <zone_id>, ...]
+# Regions are numbered 0..R-1. Every GMNS zone appears in exactly one region.
+# Lines starting with '#' are comments.
+region 0 == [25, 160, 163]
+region 1 == [127, 31, 23]
+region 2 == [75, 118, 77]
